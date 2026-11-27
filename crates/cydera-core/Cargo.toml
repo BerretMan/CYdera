@@ -20,7 +20,7 @@ getrandom = "0.3"
 # Mises à jour : comparaison des versions publiées sur GitHub Releases.
 semver = "1"
 # Lecture des fiches ECTS (PDF) : seulement sur PC, Android n'embarque pas le parseur.
-pdf-extract = { version = "0.10", optional = true }
+pdf-extract = { version = "0.12", optional = true }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 dirs.workspace = true
