@@ -25,7 +25,7 @@ pdf-extract = { version = "0.12", optional = true }
 [target.'cfg(not(target_os = "android"))'.dependencies]
 dirs.workspace = true
 # Mise à jour sur PC : vérification SHA-256 et extraction de l'archive .tar.gz.
-sha2 = "0.10"
+sha2 = "0.11"
 flate2 = "1"
 tar = "0.4"
 
