@@ -59,12 +59,19 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
+      # SDK Android préinstallé sur les runners Ubuntu : on complète avec son sdkmanager.
       - name: SDK et NDK Android
         run: |
-          sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "ndk;$NDK_VERSION" > /dev/null
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          {
+            yes | "$SDKM" --licenses > /dev/null || true
+            "$SDKM" --install "platforms;android-34" "build-tools;34.0.0" "ndk;$NDK_VERSION" > /dev/null
+            ls "$ANDROID_HOME/ndk/$NDK_VERSION/toolchains" "$ANDROID_HOME/build-tools/34.0.0/aapt2"
+          } > "$RUNNER_TEMP/sdk.log" 2>&1 || {
+            echo "::error title=sdkmanager::ANDROID_HOME=$ANDROID_HOME%0A$(tail -20 "$RUNNER_TEMP/sdk.log" | sed -e ':a;N;$!ba' -e 's/%/%25/g;s/\r//g;s/\n/%0A/g')"
+            exit 1
+          }
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
-          ls "$ANDROID_HOME/ndk" "$ANDROID_HOME/build-tools" "$ANDROID_HOME/platforms"
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_VERSION }}
