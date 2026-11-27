@@ -44,7 +44,13 @@ if [ "$MODE" = release ]; then
   "$BT/apksigner" sign --ks "$KS" --ks-key-alias cydera --ks-pass env:CYDERA_KS_PASS --out "$OUT/cydera.apk" "$OUT/aligned.apk"
 else
   KS=$HOME/.android/debug.keystore
-  [ -f "$KS" ] || keytool -genkey -v -keystore "$KS" -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US" >/dev/null
+  if [ ! -f "$KS" ]; then
+    mkdir -p "$(dirname "$KS")"
+    # Certains keytool (CI) rendent un code non nul alors que la clé est écrite : on juge sur le fichier.
+    keytool -genkey -keystore "$KS" -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 \
+      -validity 10000 -dname "CN=Android Debug,O=Android,C=US" >/dev/null 2>&1 || true
+    [ -f "$KS" ] || { echo "Création de la clé debug impossible ($KS)"; exit 1; }
+  fi
   "$BT/apksigner" sign --ks "$KS" --ks-pass pass:android --out "$OUT/cydera.apk" "$OUT/aligned.apk"
 fi
 echo "APK : $OUT/cydera.apk"
