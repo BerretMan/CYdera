@@ -4,7 +4,7 @@ members = ["crates/cydera-core", "crates/cydera-sync", "crates/cydera-ui", "apps
 default-members = ["apps/desktop"]
 
 [workspace.package]
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 edition = "2024"
 rust-version = "1.93"
 repository = "https://github.com/BerretMan/CYdera"
