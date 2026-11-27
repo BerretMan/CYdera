@@ -91,8 +91,8 @@ jobs:
         # En cas d'échec, la fin du journal devient une annotation (lisible sans droits admin).
         run: |
           set -o pipefail
-          apps/android/build-apk.sh debug 2>&1 | tee "$RUNNER_TEMP/apk.log" || {
-            echo "::error title=build-apk.sh::$(tail -25 "$RUNNER_TEMP/apk.log" | sed -e ':a;N;$!ba' -e 's/%/%25/g;s/\r//g;s/\n/%0A/g')"
+          bash -x apps/android/build-apk.sh debug 2>&1 | tee "$RUNNER_TEMP/apk.log" || {
+            echo "::error title=build-apk.sh::$(grep -v Compiling "$RUNNER_TEMP/apk.log" | tail -30 | sed -e ':a;N;$!ba' -e 's/%/%25/g;s/\r//g;s/\n/%0A/g')"
             exit 1
           }
       - name: Clippy (cible Android)
