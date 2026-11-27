@@ -1,0 +1,35 @@
+[workspace]
+resolver = "3"
+members = ["crates/cydera-core", "crates/cydera-sync", "crates/cydera-ui", "apps/desktop", "apps/android"]
+default-members = ["apps/desktop"]
+
+[workspace.package]
+version = "0.1.0-beta.1"
+edition = "2024"
+rust-version = "1.93"
+repository = "https://github.com/BerretMan/CYdera"
+
+[workspace.dependencies]
+eframe = { version = "0.35.0", default-features = false }
+reqwest = { version = "0.13.5", default-features = false, features = ["cookies", "rustls", "form"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+dirs = "6"
+thiserror = "2"
+tokio-rustls = "0.26.6"
+webpki-roots = "1.0.12"
+mailparse = "0.19.0"
+
+[profile.dev]
+# Infos de debug réduites aux numéros de ligne : les builds de test pèsent ~4x moins
+# (iroh + wgpu produisent sinon plusieurs Go de symboles).
+debug = "line-tables-only"
+
+[profile.release]
+# Profil léger : pas de LTO ni de codegen-units=1 (compilation bien plus rapide,
+# performances identiques à l'usage pour une appli d'interface).
+opt-level = 3
+strip = true
+panic = "abort"

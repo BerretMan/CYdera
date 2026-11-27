@@ -1,0 +1,404 @@
+//! Fenêtre « Révisions » : chrono par matière, basé sur les examens de l'emploi du temps.
+
+use super::theme::{self, bold, regular};
+use super::{capitalize, date_longue, jour_court};
+use crate::model::now;
+use crate::study::{Chrono, PARTS, SessionKind, fmt_hms, fmt_short};
+use chrono::NaiveDate;
+use eframe::egui::{self, Align, Align2, Color32, CornerRadius, Layout, Margin, RichText, Sense, Stroke, pos2, vec2};
+
+/// Un examen à venir (une entrée par matière, le plus proche).
+#[derive(Clone)]
+pub struct ExamRef {
+    pub subject: String,
+    pub date: NaiveDate,
+}
+
+#[derive(Default)]
+pub struct RevUi {
+    /// 0 = aujourd'hui, 1 = hier, 2 = avant-hier (pour « Ajouter »).
+    pub days_ago: i64,
+    pub new_subject: String,
+    pub show_journal: bool,
+}
+
+fn jours_avant(d: NaiveDate) -> i64 {
+    (d - now().date()).num_days()
+}
+
+fn badge_color(days: i64) -> Color32 {
+    match days {
+        d if d <= 7 => theme::NOW,
+        d if d <= 21 => theme::EXAM,
+        _ => theme::ACCENT,
+    }
+}
+
+pub fn show(ctx: &egui::Context, ch: &mut Chrono, ui_state: &mut RevUi, exams: &[ExamRef], open: &mut bool) {
+    let win = egui::Window::new(RichText::new("Révisions").font(bold(18.0)))
+        .collapsible(false)
+        .default_size([940.0_f32.min(ctx.content_rect().width() - 24.0), 640.0_f32.min(ctx.content_rect().height() - 48.0)]);
+    super::page::show(ctx, egui::Id::new("revisions"), "Révisions", win, Some(open), false, |ui| {
+        if let Some(n) = ch.notice.clone() {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(n).color(theme::WARN));
+                if ui.button("OK").clicked() {
+                    ch.notice = None;
+                }
+            });
+        }
+        // Écran étroit : les colonnes s'empilent dans une seule zone défilante.
+        if ctx.content_rect().width() < 780.0 {
+            egui::ScrollArea::vertical().id_salt("rev_narrow").auto_shrink([false, false]).show(ui, |ui| {
+                subject_list(ui, ch, ui_state, exams, 230.0);
+                ui.add_space(10.0);
+                timer_panel(ui, ch, ui_state, exams);
+                ui.add_space(14.0);
+                stats_panel(ui, ch);
+                ui.add_space(10.0);
+                journal(ui, ch, ui_state);
+            });
+            return;
+        }
+        ui.horizontal_top(|ui| {
+            ui.allocate_ui_with_layout(vec2(310.0, 560.0), Layout::top_down(Align::Min), |ui| {
+                ui.set_width(310.0);
+                subject_list(ui, ch, ui_state, exams, 470.0);
+            });
+            ui.separator();
+            ui.vertical(|ui| {
+                egui::ScrollArea::vertical().id_salt("rev_right").auto_shrink([false, false]).max_height(560.0).show(ui, |ui| {
+                    timer_panel(ui, ch, ui_state, exams);
+                    ui.add_space(14.0);
+                    stats_panel(ui, ch);
+                    ui.add_space(10.0);
+                    journal(ui, ch, ui_state);
+                });
+            });
+        });
+    });
+}
+
+// ---------------------------------------------------------------- liste des matières
+
+fn subject_list(ui: &mut egui::Ui, ch: &mut Chrono, st: &mut RevUi, exams: &[ExamRef], max_h: f32) {
+    ui.label(RichText::new("MATIÈRES").font(bold(11.5)).color(theme::DIM));
+    ui.add_space(2.0);
+    let part = ch.part.clone();
+    let mut action: Option<(String, bool)> = None; // (matière, démarrer ?)
+
+    egui::ScrollArea::vertical().id_salt("rev_list").auto_shrink([false, false]).max_height(max_h).show(ui, |ui| {
+        if !exams.is_empty() {
+            ui.label(RichText::new("Examens à venir").color(theme::MUTED));
+            for e in exams {
+                if let Some(a) = row(ui, ch, &e.subject, Some(e.date)) {
+                    action = Some(a);
+                }
+            }
+        }
+        let others: Vec<String> = ch.known_subjects().into_iter().filter(|s| !exams.iter().any(|e| &e.subject == s)).collect();
+        if !others.is_empty() {
+            ui.add_space(8.0);
+            ui.label(RichText::new("Autres matières").color(theme::MUTED));
+            for s in others {
+                if let Some(a) = row(ui, ch, &s, None) {
+                    action = Some(a);
+                }
+            }
+        }
+        if exams.is_empty() && ch.known_subjects().is_empty() {
+            ui.label(RichText::new("Aucun examen dans l'emploi du temps : ajoute une matière ci-dessous.").color(theme::MUTED));
+        }
+    });
+
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        let w = if super::page::is_page(ui.ctx()) { (ui.available_width() - 100.0).max(120.0) } else { 210.0 };
+        let r = ui.add(egui::TextEdit::singleline(&mut st.new_subject).hint_text("Ajouter une matière…").desired_width(w));
+        let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if (ui.button("Ajouter").clicked() || enter) && !st.new_subject.trim().is_empty() {
+            ch.add_custom(&st.new_subject);
+            st.new_subject.clear();
+        }
+    });
+
+    if let Some((s, start)) = action {
+        if start && ch.is_running_on(&s) {
+            ch.pause();
+        } else {
+            ch.select(&s, &part, start);
+        }
+    }
+}
+
+/// Une ligne de matière. Clic = sélectionner, bouton ▶/⏸ = lancer/arrêter.
+fn row(ui: &mut egui::Ui, ch: &Chrono, subject: &str, exam: Option<NaiveDate>) -> Option<(String, bool)> {
+    let selected = ch.subject.as_deref() == Some(subject);
+    let running = ch.is_running_on(subject);
+    let mut btn_rect = egui::Rect::NOTHING;
+    let fill = if running {
+        theme::OK.gamma_multiply(0.14)
+    } else if selected {
+        theme::CARD_HOVER
+    } else {
+        theme::CARD
+    };
+    let stroke = if selected { Stroke::new(1.5, theme::ACCENT) } else { Stroke::new(1.0, theme::LINE) };
+
+    let rect = theme::card_ex(ui, fill, stroke, 10, Margin::symmetric(10, 7), |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            if let Some(d) = exam {
+                let days = jours_avant(d);
+                let txt = if days <= 0 { "Auj.".to_string() } else { format!("J-{days}") };
+                ui.add_sized([44.0, 30.0], egui::Label::new(RichText::new(txt).font(theme::mono_bold(14.0)).color(badge_color(days))));
+            }
+            ui.vertical(|ui| {
+                ui.add(egui::Label::new(RichText::new(subject).font(bold(14.0))).truncate());
+                ui.label(
+                    RichText::new(format!("auj. {} · total {}", fmt_short(ch.today(subject)), fmt_short(ch.total(Some(subject)))))
+                        .font(regular(12.0))
+                        .color(theme::MUTED),
+                );
+            });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let (icon, col) = if running { ("⏸", theme::OK) } else { ("▶", theme::ACCENT) };
+                let sz = if super::page::is_page(ui.ctx()) { vec2(48.0, 40.0) } else { vec2(34.0, 30.0) };
+                let b = ui.add(egui::Button::new(RichText::new(icon).color(col).font(bold(15.0))).min_size(sz));
+                btn_rect = b.rect;
+            });
+        });
+    })
+    .response
+    .rect;
+
+    let resp = ui.interact(rect, ui.id().with(("rev_row", subject)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+    ui.add_space(3.0);
+    if resp.clicked() {
+        let on_btn = resp.interact_pointer_pos().is_some_and(|p| btn_rect.contains(p));
+        return Some((subject.to_string(), on_btn));
+    }
+    None
+}
+
+// ---------------------------------------------------------------- chrono
+
+fn timer_panel(ui: &mut egui::Ui, ch: &mut Chrono, st: &mut RevUi, exams: &[ExamRef]) {
+    let Some(subject) = ch.subject.clone() else {
+        ui.add_space(30.0);
+        let (ou, geste) = if ui.ctx().content_rect().width() < 780.0 { ("ci-dessus", "Touche") } else { ("à gauche", "Clique sur") };
+        ui.add(
+            egui::Label::new(
+                RichText::new(format!("Choisis une matière {ou}, puis lance le chrono.")).font(regular(16.0)).color(theme::MUTED),
+            )
+            .wrap(),
+        );
+        ui.label(RichText::new(format!("{geste} ▶ pour démarrer directement.")).color(theme::DIM));
+        return;
+    };
+    let running = ch.running();
+
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(&subject).font(bold(22.0)));
+        if let Some(e) = exams.iter().find(|e| e.subject == subject) {
+            let d = jours_avant(e.date);
+            let txt = if d <= 0 { "examen aujourd'hui".to_string() } else { format!("examen dans {d} j · {}", date_longue(e.date)) };
+            ui.label(RichText::new(txt).color(badge_color(d)));
+        }
+    });
+    ui.horizontal(|ui| {
+        let mut part = ch.part.clone();
+        for p in PARTS {
+            ui.selectable_value(&mut part, p.to_string(), p);
+        }
+        if part != ch.part {
+            ch.select(&subject, &part, false);
+        }
+    });
+
+    ui.add_space(6.0);
+    let col = if running { theme::OK } else { theme::TEXT };
+    let size = (ui.available_width() / 5.3).clamp(30.0, 64.0);
+    theme::tabular_label(ui, &fmt_hms(ch.run_secs()), theme::mono_bold(size), col);
+    ui.label(
+        RichText::new(
+            if running { "Session en cours" } else { "Prêt" }.to_string()
+                + &format!(" · {} aujourd'hui sur {}", fmt_short(ch.today(&subject)), subject),
+        )
+        .color(theme::MUTED),
+    );
+    ui.add_space(8.0);
+
+    let (label, fill) = if running {
+        ("⏸  Pause  (Espace)", theme::WARN.gamma_multiply(0.85))
+    } else {
+        ("▶  Démarrer  (Espace)", theme::OK.gamma_multiply(0.85))
+    };
+    if ui
+        .add_sized(
+            [ui.available_width().min(420.0), 50.0],
+            egui::Button::new(RichText::new(label).font(bold(17.0)).color(Color32::BLACK)).fill(fill),
+        )
+        .clicked()
+    {
+        ch.toggle();
+    }
+
+    ui.add_space(10.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new("Ajouter").color(theme::DIM));
+        for m in [10, 15, 30, 60] {
+            if ui.button(format!("+{m} min")).clicked() {
+                ch.add_minutes(m, st.days_ago);
+            }
+        }
+        egui::ComboBox::from_id_salt("rev_days")
+            .selected_text(["aujourd'hui", "hier", "avant-hier"][st.days_ago as usize % 3])
+            .width(110.0)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut st.days_ago, 0, "aujourd'hui");
+                ui.selectable_value(&mut st.days_ago, 1, "hier");
+                ui.selectable_value(&mut st.days_ago, 2, "avant-hier");
+            });
+    });
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new("Retirer ").color(theme::DIM));
+        for m in [5, 10, 15] {
+            if ui.button(format!("−{m} min")).clicked() {
+                ch.subtract_minutes(m);
+            }
+        }
+    });
+}
+
+// ---------------------------------------------------------------- stats
+
+fn tile(ui: &mut egui::Ui, title: &str, value: String, w: f32) {
+    theme::card(ui, Margin::symmetric(12, 8), |ui| {
+        ui.set_width(w);
+        // titre au-dessus de la valeur (le cadre hérite sinon de la ligne horizontale parente)
+        ui.vertical(|ui| {
+            ui.set_width(w);
+            ui.add(egui::Label::new(RichText::new(title).font(regular(12.0)).color(theme::DIM)).truncate());
+            ui.add(egui::Label::new(RichText::new(value).font(theme::mono_bold(20.0))).truncate());
+        });
+    });
+}
+
+fn stats_panel(ui: &mut egui::Ui, ch: &Chrono) {
+    let subject = ch.subject.clone();
+    ui.horizontal(|ui| {
+        // largeur intérieure : 3 tuiles + 2 espacements, moins les marges (2×12) et bordures de chaque carte
+        let gap = ui.spacing().item_spacing.x;
+        let w = ((ui.available_width() - 2.0 * gap) / 3.0 - 26.0).clamp(56.0, 160.0);
+        tile(ui, "AUJOURD'HUI", fmt_short(ch.today_all()), w);
+        tile(ui, "CETTE SEMAINE", fmt_short(ch.week(None)), w);
+        tile(
+            ui,
+            &subject.as_deref().map_or("TOTAL".to_string(), |s| format!("TOTAL · {}", s.to_uppercase())),
+            fmt_short(ch.total(subject.as_deref())),
+            w,
+        );
+    });
+
+    ui.add_space(12.0);
+    ui.label(RichText::new("7 DERNIERS JOURS").font(bold(11.5)).color(theme::DIM));
+    let days = ch.last_days(7);
+    let max = days.iter().map(|(_, s)| *s).max().unwrap_or(0).max(3600) as f32;
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().min(560.0), 130.0), Sense::hover());
+    let p = ui.painter_at(rect);
+    let slot = rect.width() / 7.0;
+    for (i, (d, s)) in days.iter().enumerate() {
+        let x = rect.left() + slot * i as f32 + slot / 2.0;
+        let chart_h = rect.height() - 38.0;
+        let h = (*s as f32 / max * chart_h).max(if *s > 0 { 3.0 } else { 0.0 });
+        let today = i == 6;
+        let bar = egui::Rect::from_min_max(
+            pos2(x - slot * 0.28, rect.top() + 16.0 + chart_h - h),
+            pos2(x + slot * 0.28, rect.top() + 16.0 + chart_h),
+        );
+        p.rect_filled(
+            egui::Rect::from_min_max(pos2(bar.left(), rect.top() + 16.0), pos2(bar.right(), bar.bottom())),
+            CornerRadius::same(4),
+            theme::CARD,
+        );
+        if h > 0.0 {
+            p.rect_filled(bar, CornerRadius::same(4), if today { theme::ACCENT } else { theme::ACCENT.gamma_multiply(0.55) });
+        }
+        if *s > 0 {
+            p.text(pos2(x, bar.top() - 3.0), Align2::CENTER_BOTTOM, fmt_short(*s), theme::mono(10.0), theme::MUTED);
+        }
+        p.text(
+            pos2(x, rect.bottom() - 2.0),
+            Align2::CENTER_BOTTOM,
+            jour_court(*d),
+            theme::mono(10.5),
+            if today { theme::TEXT } else { theme::DIM },
+        );
+    }
+
+    let by = ch.week_by_subject();
+    if !by.is_empty() {
+        ui.add_space(12.0);
+        ui.label(RichText::new("PAR MATIÈRE · SEMAINE").font(bold(11.5)).color(theme::DIM));
+        let top = by[0].1.max(1) as f32;
+        for (s, t) in by.iter().take(8) {
+            ui.horizontal(|ui| {
+                ui.add_sized([150.0, 18.0], egui::Label::new(RichText::new(s).font(regular(13.0))).truncate());
+                let w = (ui.available_width() - 70.0).clamp(40.0, 300.0);
+                let (r, _) = ui.allocate_exact_size(vec2(w, 12.0), Sense::hover());
+                ui.painter().rect_filled(r, CornerRadius::same(4), theme::CARD);
+                let fill = egui::Rect::from_min_size(r.min, vec2((r.width() * *t as f32 / top).max(4.0), r.height()));
+                ui.painter().rect_filled(fill, CornerRadius::same(4), theme::ACCENT);
+                ui.label(RichText::new(fmt_short(*t)).font(regular(12.5)).color(theme::MUTED));
+            });
+        }
+    }
+}
+
+// ---------------------------------------------------------------- journal
+
+fn journal(ui: &mut egui::Ui, ch: &mut Chrono, st: &mut RevUi) {
+    let label = if st.show_journal { "Masquer le journal des sessions" } else { "Afficher le journal des sessions" };
+    if ui.selectable_label(st.show_journal, label).clicked() {
+        st.show_journal = !st.show_journal;
+    }
+    if !st.show_journal {
+        return;
+    }
+    if ch.undo.is_some() {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Session supprimée.").color(theme::MUTED));
+            if ui.button("Annuler").clicked() {
+                ch.undo_delete();
+            }
+        });
+    }
+    let mut del = None;
+    let mut last_day = None;
+    for s in ch.sessions().iter().rev().take(60) {
+        if last_day != Some(s.day()) {
+            last_day = Some(s.day());
+            ui.add_space(6.0);
+            ui.label(RichText::new(capitalize(&date_longue(s.day()))).font(bold(13.0)));
+        }
+        ui.horizontal(|ui| {
+            let (txt, col) = match s.kind {
+                SessionKind::Adjust => (format!("−{}", fmt_short(-s.secs)), theme::NOW),
+                SessionKind::Manual => (format!("+{} (ajouté)", fmt_short(s.secs)), theme::WARN),
+                SessionKind::Work => (fmt_short(s.secs), theme::OK),
+            };
+            ui.add_sized([96.0, 18.0], egui::Label::new(RichText::new(txt).color(col)));
+            ui.label(RichText::new(format!("{} · {}", s.subject, s.part)));
+            ui.label(RichText::new(s.start.format("%H:%M").to_string()).font(regular(12.0)).color(theme::DIM));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.small_button("🗑").on_hover_text("Supprimer").clicked() {
+                    del = Some(s.id.clone());
+                }
+            });
+        });
+    }
+    if let Some(id) = del {
+        ch.delete(&id);
+    }
+}

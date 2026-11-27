@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Cydera
+GenericName=Emploi du temps et révisions
+Comment=Emploi du temps CY Tech (Celcat), mails et chrono de révisions
+Exec=cydera
+Icon=cydera
+Terminal=false
+Categories=Office;Calendar;Education;
+Keywords=cours;edt;celcat;cytech;emploi du temps;examens;chrono;révisions;agartha;
+StartupWMClass=cydera
+StartupNotify=true

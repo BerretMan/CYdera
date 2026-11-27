@@ -1,0 +1,16 @@
+[package]
+name = "cydera"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Cydera : emploi du temps CY Tech (Celcat), mails et chrono de révisions"
+
+[dependencies]
+cydera-core = { path = "../../crates/cydera-core", features = ["ects-pdf"] }
+# Dialogue « Ouvrir » du système (portail XDG) pour importer une fiche ECTS.
+rfd = { version = "0.18", default-features = false, features = ["xdg-portal"] }
+cydera-ui = { path = "../../crates/cydera-ui" }
+eframe = { workspace = true, default-features = true }
+tokio.workspace = true
+chrono.workspace = true

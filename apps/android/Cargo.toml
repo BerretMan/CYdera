@@ -1,0 +1,21 @@
+[package]
+name = "cydera-android"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Cydera : point d'entrée Android (NativeActivity)"
+
+[lib]
+name = "cydera_android"
+crate-type = ["cdylib"]
+
+[target.'cfg(target_os = "android")'.dependencies]
+cydera-core = { path = "../../crates/cydera-core" }
+cydera-ui = { path = "../../crates/cydera-ui" }
+eframe = { workspace = true, features = ["android-native-activity", "default_fonts", "wgpu"] }
+android-activity = { version = "0.6", features = ["native-activity"] }
+android_logger = "0.15"
+log = "0.4"
+jni = "0.22"
+tokio.workspace = true

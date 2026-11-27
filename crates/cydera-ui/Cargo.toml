@@ -1,0 +1,15 @@
+[package]
+name = "cydera-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Cydera : interface egui partagée Desktop / Android"
+
+[dependencies]
+cydera-core = { path = "../cydera-core" }
+cydera-sync = { path = "../cydera-sync" }
+qrcode = { version = "0.15", default-features = false }
+eframe.workspace = true
+tokio.workspace = true
+chrono.workspace = true

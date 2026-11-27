@@ -1,0 +1,285 @@
+{
+  "id": "",
+  "name": "ING2 GI-a",
+  "year": "2026-2027",
+  "semesters": [
+    {
+      "name": "Semestre 1",
+      "ues": [
+        {
+          "id": "s1.ue1",
+          "code": "UE1",
+          "name": "Mathématiques & Informatique 1",
+          "ects": 10.0,
+          "coef": 10.0,
+          "ecs": [
+            {
+              "id": "s1.ue1.ec1",
+              "code": "EC1",
+              "name": "Statistiques appliquées et modélisation",
+              "coef": 4.0,
+              "seuil": 6.0
+            },
+            {
+              "id": "s1.ue1.ec2",
+              "code": "EC2",
+              "name": "Optimisation déterministe",
+              "coef": 3.0,
+              "seuil": 6.0
+            },
+            {
+              "id": "s1.ue1.ec3",
+              "code": "EC3",
+              "name": "Intelligence Artificielle : théorie et algorithme",
+              "coef": 4.0,
+              "seuil": 6.0
+            },
+            {
+              "id": "s1.ue1.ec4",
+              "code": "EC4",
+              "name": "Test Logiciel",
+              "coef": 3.0,
+              "seuil": 6.0
+            },
+            {
+              "id": "s1.ue1.ec5",
+              "code": "EC5",
+              "name": "DevOps",
+              "coef": 2.0,
+              "seuil": 6.0
+            }
+          ]
+        },
+        {
+          "id": "s1.ue2",
+          "code": "UE2",
+          "name": "Informatique",
+          "ects": 12.0,
+          "coef": 12.0,
+          "ecs": [
+            {
+              "id": "s1.ue2.ec1",
+              "code": "EC1",
+              "name": "Design Patterns",
+              "coef": 3.0,
+              "seuil": 6.0
+            },
+            {
+              "id": "s1.ue2.ec2",
+              "code": "EC2",
+              "name": "Programmation systèmes et réseaux",
+              "coef": 3.0,
+              "seuil": 6.0
+            },
+            {
+              "id": "s1.ue2.ec3",
+              "code": "EC3",
+              "name": "Architecture et programmation parallèle",
+              "coef": 3.0,
+              "seuil": 6.0
+            },
+            {
+              "id": "s1.ue2.ec4",
+              "code": "EC4",
+              "name": "Cybersécurité operationnelle",
+              "coef": 2.0,
+              "seuil": 6.0
+            },
+            {
+              "id": "s1.ue2.ec5",
+              "code": "EC5",
+              "name": "Réseaux avancés",
+              "coef": 3.0,
+              "seuil": 6.0
+            },
+            {
+              "id": "s1.ue2.sae1",
+              "code": "SAE1",
+              "name": "Développement distribué Java EE",
+              "coef": 4.0,
+              "seuil": 6.0
+            }
+          ]
+        },
+        {
+          "id": "s1.ue3",
+          "code": "UE3",
+          "name": "Culture Ingénieur",
+          "ects": 6.0,
+          "coef": 6.0,
+          "ecs": [
+            {
+              "id": "s1.ue3.ec1",
+              "code": "EC1",
+              "name": "LV1 - Anglais",
+              "coef": 1.0,
+              "seuil": 6.0
+            },
+            {
+              "id": "s1.ue3.ec2",
+              "code": "EC2",
+              "name": "LV2 ou remédiation TOEIC",
+              "coef": 0.0,
+              "seuil": null
+            },
+            {
+              "id": "s1.ue3.ec3",
+              "code": "EC3",
+              "name": "Communication interculturelle",
+              "coef": 2.0,
+              "seuil": 6.0
+            },
+            {
+              "id": "s1.ue3.ec4",
+              "code": "EC4",
+              "name": "Ecoute et conduite d'entretien",
+              "coef": 3.0,
+              "seuil": 6.0
+            },
+            {
+              "id": "s1.ue3.ec5",
+              "code": "EC5",
+              "name": "Economie 1",
+              "coef": 4.0,
+              "seuil": 6.0
+            }
+          ]
+        },
+        {
+          "id": "s1.ue4",
+          "code": "UE4",
+          "name": "Parcours d'engagement de professionnalisation",
+          "ects": 2.0,
+          "coef": 2.0,
+          "ecs": [
+            {
+              "id": "s1.ue4.ec1",
+              "code": "EC1",
+              "name": "Engagement étudiant",
+              "coef": 1.0,
+              "seuil": null
+            },
+            {
+              "id": "s1.ue4.ec2",
+              "code": "EC2",
+              "name": "Projet personnel et professionnel",
+              "coef": 1.0,
+              "seuil": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Semestre 2",
+      "ues": [
+        {
+          "id": "s2.ue1",
+          "code": "UE1",
+          "name": "Mathématiques & Informatique 2",
+          "ects": 2.0,
+          "coef": 2.0,
+          "ecs": [
+            {
+              "id": "s2.ue1.ec1",
+              "code": "EC1",
+              "name": "Bases de données avancées",
+              "coef": 1.0,
+              "seuil": 6.0
+            },
+            {
+              "id": "s2.ue1.ec2",
+              "code": "EC2",
+              "name": "IA agentique",
+              "coef": 1.0,
+              "seuil": 6.0
+            }
+          ]
+        },
+        {
+          "id": "s2.ue2a",
+          "code": "UE2a",
+          "name": "Sciences des données & Intelligence Artificielle (IA)",
+          "ects": 4.0,
+          "coef": 4.0,
+          "ecs": [
+            {
+              "id": "s2.ue2a.ec1",
+              "code": "EC1",
+              "name": "Programmation fonctionnelle",
+              "coef": 1.0,
+              "seuil": 6.0
+            },
+            {
+              "id": "s2.ue2a.ec2",
+              "code": "EC2",
+              "name": "Introduction aux séries temporelles",
+              "coef": 1.0,
+              "seuil": 6.0
+            },
+            {
+              "id": "s2.ue2a.ec3",
+              "code": "EC3",
+              "name": "Deep learning & computer vision",
+              "coef": 1.0,
+              "seuil": 6.0
+            },
+            {
+              "id": "s2.ue2a.sae1",
+              "code": "SAE1",
+              "name": "Cours électif",
+              "coef": 1.0,
+              "seuil": 6.0
+            }
+          ]
+        },
+        {
+          "id": "s2.ue3",
+          "code": "UE3",
+          "name": "Projet",
+          "ects": 4.0,
+          "coef": 4.0,
+          "ecs": [
+            {
+              "id": "s2.ue3.ec1",
+              "code": "EC1",
+              "name": "Agile",
+              "coef": 0.0,
+              "seuil": null
+            },
+            {
+              "id": "s2.ue3.ec2",
+              "code": "EC2",
+              "name": "Design de la décision",
+              "coef": 1.0,
+              "seuil": 6.0
+            },
+            {
+              "id": "s2.ue3.sae1",
+              "code": "SAE1",
+              "name": "Projet",
+              "coef": 3.0,
+              "seuil": 6.0
+            }
+          ]
+        },
+        {
+          "id": "s2.ue4",
+          "code": "UE4",
+          "name": "Parcours d'engagement de professionalisation",
+          "ects": 20.0,
+          "coef": 20.0,
+          "ecs": [
+            {
+              "id": "s2.ue4.ec1",
+              "code": "EC1",
+              "name": "Stage",
+              "coef": 1.0,
+              "seuil": null
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,172 @@
+# Publication d'une version : push d'un tag vX.Y.Z[-beta.N] (créé par scripts/version.sh).
+# Produit cydera-linux-x86_64.tar.gz, cydera.apk (signé) et SHA256SUMS, attachés à la release.
+# Ces noms sont fixes : l'appli les cherche pour se mettre à jour (cydera-core/src/update.rs).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: "1.93.1"
+  NDK_VERSION: "27.3.13750724"
+
+jobs:
+  verifier:
+    name: Cohérence tag / version
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          V=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          if [ "v$V" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Le tag $GITHUB_REF_NAME ne correspond pas à la version $V de Cargo.toml (utilise scripts/version.sh)."
+            exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          if [[ $V == *-* ]]; then echo "prerelease=true"; else echo "prerelease=false"; fi >> "$GITHUB_OUTPUT"
+
+  linux:
+    name: Archive Linux x86_64
+    needs: verifier
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: desktop
+          save-if: false
+      - name: Dépendances système
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq --no-install-recommends pkg-config libxkbcommon-dev libwayland-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+      - name: Compilation (le profil release retire déjà les symboles)
+        run: cargo build --release -p cydera --locked
+      - name: Archive
+        run: |
+          D=cydera-linux-x86_64
+          mkdir "$D"
+          cp target/release/cydera "$D/"
+          cp crates/cydera-ui/assets/icon.png "$D/cydera.png"
+          cp packaging/linux/cydera.desktop packaging/linux/install.sh "$D/"
+          tar czf "$D.tar.gz" "$D"
+          tar tzf "$D.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: cydera-linux-x86_64.tar.gz
+
+  android:
+    name: APK signé
+    needs: verifier
+    runs-on: ubuntu-22.04
+    # Les secrets de signature ne sont exposés qu'à cet environnement.
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platforms;android-34 build-tools;34.0.0 ndk;${{ env.NDK_VERSION }}
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: aarch64-linux-android, armv7-linux-androideabi
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: android-release
+      - name: Keystore temporaire
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          [ -n "$ANDROID_KEYSTORE_BASE64" ] || { echo "::error::Secret ANDROID_KEYSTORE_BASE64 absent (environnement release)."; exit 1; }
+          umask 077
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/cydera.jks"
+      - name: Construction et signature
+        env:
+          CYDERA_KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
+          CYDERA_KS="$RUNNER_TEMP/cydera.jks" apps/android/build-apk.sh release
+      - name: Suppression du keystore
+        if: always()
+        run: shred -u "$RUNNER_TEMP/cydera.jks" 2>/dev/null || rm -f "$RUNNER_TEMP/cydera.jks"
+      - name: Vérification (signature, empreinte du certificat, version)
+        run: |
+          BT="$ANDROID_HOME/build-tools/34.0.0"
+          "$BT/apksigner" verify --print-certs target/apk/release/cydera.apk | grep -E "SHA-256|DN"
+          "$BT/aapt2" dump badging target/apk/release/cydera.apk | head -1
+          "$BT/aapt2" dump badging target/apk/release/cydera.apk | grep -q "versionName='${{ needs.verifier.outputs.version }}'"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: target/apk/release/cydera.apk
+
+  publish:
+    name: Release GitHub
+    needs: [verifier, linux, android]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Sommes SHA-256
+        working-directory: dist
+        run: |
+          sha256sum cydera.apk cydera-linux-x86_64.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/cydera.apk
+            dist/cydera-linux-x86_64.tar.gz
+      - name: Notes de version (commits depuis le tag précédent)
+        run: |
+          PREV=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          {
+            echo "## Changements"
+            git log --no-merges --pretty='- %s' ${PREV:+$PREV..}"$GITHUB_REF_NAME"
+            echo
+            echo "## Installation"
+            echo "- **Linux** : \`tar xzf cydera-linux-x86_64.tar.gz && ./cydera-linux-x86_64/install.sh\`"
+            echo "- **Android** : télécharger \`cydera.apk\` sur le téléphone et l'ouvrir."
+            echo "- Déjà installé : l'appli propose la mise à jour toute seule."
+            echo
+            echo "Vérification : \`sha256sum -c SHA256SUMS\` ou \`gh attestation verify <fichier> -R $GITHUB_REPOSITORY\`."
+          } > notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Cydera ${{ needs.verifier.outputs.version }}
+          body_path: notes.md
+          generate_release_notes: true
+          prerelease: ${{ needs.verifier.outputs.prerelease == 'true' }}
+          files: |
+            dist/cydera-linux-x86_64.tar.gz
+            dist/cydera.apk
+            dist/SHA256SUMS

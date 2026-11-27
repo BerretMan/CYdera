@@ -1,0 +1,29 @@
+# Artefacts de compilation (desktop, Android, APK)
+/target/
+*.apk
+*.aab
+*.idsig
+
+# Clés de signature : ne jamais publier
+*.jks
+*.keystore
+
+# Secrets locaux
+.env
+.env.*
+!.env.example
+CELCAT_PASSWORD
+CYU_MAIL_PASSWORD
+
+# Documents de l'école et fichiers personnels (restent en local)
+/ECTS.pdf
+crates/cydera-core/tests/fixtures/*.pdf
+/example.md
+/NewNewIcon.png
+
+# Éditeurs et outils
+.idea/
+.vscode/
+*.swp
+*~
+local.properties
