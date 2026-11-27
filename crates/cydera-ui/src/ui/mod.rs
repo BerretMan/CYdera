@@ -9,6 +9,7 @@ pub mod motion;
 pub mod page;
 pub mod revisions;
 pub mod side;
+pub mod stats;
 pub mod telemetry;
 pub mod theme;
 pub mod update;

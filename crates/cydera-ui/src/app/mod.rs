@@ -9,6 +9,7 @@ use crate::study::{Chrono, fmt_hms};
 use crate::ui::devices::{self, DevAction, DevicesUi};
 use crate::ui::grades::{self as grades_ui, GradesUi};
 use crate::ui::revisions::{self, ExamRef, RevUi};
+use crate::ui::stats::{self as stats_ui, StatsUi};
 use crate::ui::theme::{self, bold, regular};
 use crate::ui::{self, Action, MOIS, capitalize, date_longue};
 use chrono::{Datelike, Duration, NaiveDate};
@@ -52,6 +53,7 @@ enum Act {
     Exams,
     Mails,
     Rev,
+    Stats,
     About,
     Refresh,
 }
@@ -87,6 +89,9 @@ pub struct App {
     chrono: Chrono,
     rev_ui: RevUi,
     show_rev: bool,
+    /// Écran « Statistique » (graphiques de révision).
+    show_stats: bool,
+    stats_ui: StatsUi,
     show_about: bool,
     show_resto: bool,
     resto_tab: usize,
@@ -123,6 +128,10 @@ pub struct App {
     show_grades: bool,
     /// Mises à jour publiées sur GitHub (bandeau, page « Mise à jour », « À propos »).
     maj: crate::update::Maj,
+    /// Widgets Android : dernier état écrit, dernier passage, emploi du temps à réécrire.
+    widget_last: Option<cydera_core::widget::ChronoState>,
+    widget_tick: Option<Instant>,
+    widget_edt_dirty: bool,
 }
 
 /// Formulaire de connexion (affiché tant qu'aucun mot de passe n'est enregistré).
@@ -167,6 +176,8 @@ impl App {
             chrono,
             rev_ui: RevUi::default(),
             show_rev: false,
+            show_stats: false,
+            stats_ui: StatsUi::default(),
             show_about: false,
             show_resto: false,
             resto_tab: 0,
@@ -196,11 +207,44 @@ impl App {
             grades_ui: GradesUi::default(),
             show_grades: false,
             maj: Default::default(),
+            widget_last: None,
+            widget_tick: None,
+            widget_edt_dirty: true,
+        }
+    }
+
+    /// Widgets d'écran d'accueil (hôte Android seulement) : appuis ▶/⏸ en attente, état du chrono,
+    /// emploi du temps. Une fois par seconde.
+    fn widgets(&mut self) {
+        use cydera_core::widget as w;
+        if !crate::widget::enabled() || self.widget_tick.is_some_and(|t| t.elapsed().as_millis() < 1000) {
+            return;
+        }
+        self.widget_tick = Some(Instant::now());
+        let cmds = w::take_commands();
+        if !cmds.is_empty() {
+            self.chrono.apply_widget(cmds);
+        }
+        let mut changed = false;
+        let st = self.chrono.widget_state();
+        if self.widget_last.as_ref() != Some(&st) {
+            w::write_chrono(&st);
+            self.widget_last = Some(st);
+            changed = true;
+        }
+        if self.widget_edt_dirty {
+            w::write_edt(&self.store.cours, now());
+            self.widget_edt_dirty = false;
+            changed = true;
+        }
+        if changed {
+            crate::widget::notify();
         }
     }
 
     fn poll(&mut self, ctx: &egui::Context) {
         self.maj.poll();
+        self.widgets();
         self.mail.poll(ctx);
         while let Ok((i, r)) = self.resto_rx.try_recv() {
             self.resto_pending = self.resto_pending.saturating_sub(1);
@@ -219,6 +263,7 @@ impl App {
                 Ok(cours) => {
                     self.store.merge(msg.from, msg.to, cours);
                     self.store.save();
+                    self.widget_edt_dirty = true;
                     self.error = None;
                 }
                 Err(e) => self.error = Some(e),
@@ -566,6 +611,11 @@ impl eframe::App for App {
             let mut open = true;
             revisions::show(&ctx, &mut self.chrono, &mut self.rev_ui, &exams, &mut open);
             self.show_rev = open;
+        }
+        if self.show_stats {
+            let mut open = true;
+            stats_ui::show(&ctx, &self.chrono, &self.store, &mut self.stats_ui, &mut open);
+            self.show_stats = open;
         }
         self.resto_window(&ctx);
         self.about_window(&ctx);

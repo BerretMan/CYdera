@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_chrono">Cydera · Chrono</string>
+    <string name="widget_chrono_desc">Lance ou met en pause le chrono de révisions sans ouvrir l\'appli.</string>
+    <string name="widget_edt">Cydera · Emploi du temps</string>
+    <string name="widget_edt_desc">Cours actuel et prochains cours.</string>
+</resources>

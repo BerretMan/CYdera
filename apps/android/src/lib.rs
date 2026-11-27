@@ -43,6 +43,13 @@ fn android_main(app: AndroidApp) {
         let a = ai.clone();
         std::thread::spawn(move || maj::installer(&a, &url, &*rappel));
     });
+    // Widgets d'écran d'accueil : l'app écrit leurs fichiers, puis les fait redessiner.
+    let aw = app.clone();
+    cydera_ui::widget::set_notifier(move || {
+        if widget_refresh(&aw).is_err() {
+            log::warn!("widgets : rafraîchissement impossible");
+        }
+    });
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("runtime tokio");
     let handle = rt.handle().clone();
 
@@ -90,6 +97,34 @@ fn system_insets(app: &AndroidApp) -> Option<[f32; 4]> {
     })
     .ok()
     .flatten()
+}
+
+/// Demande aux widgets de se redessiner : broadcast explicite (paquet de l'app) reçu par le
+/// récepteur non exporté `fr.cydera.app.WidgetActions`.
+fn widget_refresh(app: &AndroidApp) -> jni::errors::Result<()> {
+    use jni::objects::{JObject, JString, JValue};
+    use std::mem::ManuallyDrop;
+    let vm = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr() as *mut _) };
+    vm.attach_current_thread(|env| -> jni::errors::Result<()> {
+        let activity = ManuallyDrop::new(unsafe { JObject::from_raw(env, app.activity_as_ptr() as jni::sys::jobject) });
+        let action = JString::from_str(env, "fr.cydera.app.WIDGET_REFRESH")?;
+        let intent =
+            env.new_object(jni::jni_str!("android/content/Intent"), jni::jni_sig!("(Ljava/lang/String;)V"), &[JValue::Object(&action)])?;
+        let pkg = JString::from_str(env, "fr.cydera.app")?;
+        env.call_method(
+            &intent,
+            jni::jni_str!("setPackage"),
+            jni::jni_sig!("(Ljava/lang/String;)Landroid/content/Intent;"),
+            &[JValue::Object(&pkg)],
+        )?;
+        env.call_method(
+            &*activity,
+            jni::jni_str!("sendBroadcast"),
+            jni::jni_sig!("(Landroid/content/Intent;)V"),
+            &[JValue::Object(&intent)],
+        )?;
+        Ok(())
+    })
 }
 
 /// Lit un extra texte (`--es clé valeur`) de l'intent de lancement.

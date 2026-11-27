@@ -1,11 +1,11 @@
 //! Fenêtre « Révisions » : chrono par matière, basé sur les examens de l'emploi du temps.
 
 use super::theme::{self, bold, regular};
-use super::{capitalize, date_longue, jour_court};
+use super::{capitalize, date_longue};
 use crate::model::now;
-use crate::study::{Chrono, PARTS, SessionKind, fmt_hms, fmt_short};
+use crate::study::{Chrono, PARTS, SessionKind, fmt_hms, fmt_precise, fmt_short};
 use chrono::NaiveDate;
-use eframe::egui::{self, Align, Align2, Color32, CornerRadius, Layout, Margin, RichText, Sense, Stroke, pos2, vec2};
+use eframe::egui::{self, Align, Color32, Layout, Margin, RichText, Sense, Stroke, vec2};
 
 /// Un examen à venir (une entrée par matière, le plus proche).
 #[derive(Clone)]
@@ -16,8 +16,10 @@ pub struct ExamRef {
 
 #[derive(Default)]
 pub struct RevUi {
-    /// 0 = aujourd'hui, 1 = hier, 2 = avant-hier (pour « Ajouter »).
+    /// 0 = aujourd'hui, 1 = hier, 2 = avant-hier (jour visé par le sélecteur de temps).
     pub days_ago: i64,
+    /// Minutes choisies au sélecteur (> 0 ajouter, < 0 retirer), appliquées par « Appliquer ».
+    pub adjust: i64,
     pub new_subject: String,
     pub show_journal: bool,
     /// Matière dont la suppression attend confirmation.
@@ -51,12 +53,11 @@ pub fn show(ctx: &egui::Context, ch: &mut Chrono, ui_state: &mut RevUi, exams: &
         }
         // Écran étroit : les colonnes s'empilent dans une seule zone défilante.
         if ctx.content_rect().width() < 780.0 {
+            // Chrono en tête : c'est ce qu'on vient chercher sur le téléphone.
             egui::ScrollArea::vertical().id_salt("rev_narrow").auto_shrink([false, false]).show(ui, |ui| {
-                subject_list(ui, ch, ui_state, exams, 230.0);
-                ui.add_space(10.0);
                 timer_panel(ui, ch, ui_state, exams);
                 ui.add_space(14.0);
-                stats_panel(ui, ch);
+                subject_list(ui, ch, ui_state, exams, 230.0);
                 ui.add_space(10.0);
                 journal(ui, ch, ui_state);
             });
@@ -72,8 +73,6 @@ pub fn show(ctx: &egui::Context, ch: &mut Chrono, ui_state: &mut RevUi, exams: &
                 egui::ScrollArea::vertical().id_salt("rev_right").auto_shrink([false, false]).max_height(560.0).show(ui, |ui| {
                     timer_panel(ui, ch, ui_state, exams);
                     ui.add_space(14.0);
-                    stats_panel(ui, ch);
-                    ui.add_space(10.0);
                     journal(ui, ch, ui_state);
                 });
             });
@@ -218,7 +217,7 @@ fn row(ui: &mut egui::Ui, ch: &Chrono, subject: &str, exam: Option<NaiveDate>, d
 fn timer_panel(ui: &mut egui::Ui, ch: &mut Chrono, st: &mut RevUi, exams: &[ExamRef]) {
     let Some(subject) = ch.subject.clone() else {
         ui.add_space(30.0);
-        let (ou, geste) = if ui.ctx().content_rect().width() < 780.0 { ("ci-dessus", "Touche") } else { ("à gauche", "Clique sur") };
+        let (ou, geste) = if ui.ctx().content_rect().width() < 780.0 { ("ci-dessous", "Touche") } else { ("à gauche", "Clique sur") };
         ui.add(
             egui::Label::new(
                 RichText::new(format!("Choisis une matière {ou}, puis lance le chrono.")).font(regular(16.0)).color(theme::MUTED),
@@ -277,115 +276,65 @@ fn timer_panel(ui: &mut egui::Ui, ch: &mut Chrono, st: &mut RevUi, exams: &[Exam
     }
 
     ui.add_space(10.0);
-    ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new("Ajouter").color(theme::DIM));
-        for m in [10, 15, 30, 60] {
-            if ui.button(format!("+{m} min")).clicked() {
-                ch.add_minutes(m, st.days_ago);
+    time_picker(ui, ch, st);
+}
+
+/// Sélecteur de temps : −10 −5 −1 [valeur] +1 +5 +10, jour visé, puis « Appliquer ».
+fn time_picker(ui: &mut egui::Ui, ch: &mut Chrono, st: &mut RevUi) {
+    let page = super::page::is_page(ui.ctx());
+    // 6 boutons + la valeur sur une ligne : sur téléphone, la largeur des boutons suit l'écran.
+    let value_w = 78.0;
+    let gap = ui.spacing().item_spacing.x;
+    let bw = ((ui.available_width() - value_w - 6.0 * gap) / 6.0).clamp(34.0, 52.0);
+    let bsz = if page { vec2(bw, 44.0) } else { vec2(38.0, 28.0) };
+    ui.label(RichText::new("AJOUTER OU RETIRER DU TEMPS").font(bold(11.5)).color(theme::DIM));
+    ui.add_space(2.0);
+    ui.horizontal(|ui| {
+        for m in [-10, -5, -1] {
+            let b = egui::Button::new(RichText::new(format!("−{}", -m)).font(theme::mono_bold(14.0)).color(theme::NOW)).min_size(bsz);
+            if ui.add(b).clicked() {
+                st.adjust = (st.adjust + m).clamp(-600, 600);
             }
         }
+        let (txt, col) = match st.adjust {
+            0 => ("0 min".to_string(), theme::MUTED),
+            a if a > 0 => (format!("+{a} min"), theme::OK),
+            a => (format!("−{} min", -a), theme::NOW),
+        };
+        ui.add_sized([value_w, bsz.y], egui::Label::new(RichText::new(txt).font(theme::mono_bold(16.0)).color(col)));
+        for m in [1, 5, 10] {
+            let b = egui::Button::new(RichText::new(format!("+{m}")).font(theme::mono_bold(14.0)).color(theme::OK)).min_size(bsz);
+            if ui.add(b).clicked() {
+                st.adjust = (st.adjust + m).clamp(-600, 600);
+            }
+        }
+    });
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
         egui::ComboBox::from_id_salt("rev_days")
             .selected_text(["aujourd'hui", "hier", "avant-hier"][st.days_ago as usize % 3])
-            .width(110.0)
+            .width(if page { 140.0 } else { 110.0 })
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut st.days_ago, 0, "aujourd'hui");
                 ui.selectable_value(&mut st.days_ago, 1, "hier");
                 ui.selectable_value(&mut st.days_ago, 2, "avant-hier");
             });
-    });
-    ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new("Retirer ").color(theme::DIM));
-        for m in [5, 10, 15] {
-            if ui.button(format!("−{m} min")).clicked() {
-                ch.subtract_minutes(m);
-            }
+        let label = match st.adjust {
+            a if a > 0 => "Ajouter",
+            a if a < 0 => "Retirer",
+            _ => "Appliquer",
+        };
+        let b = egui::Button::new(RichText::new(label).font(bold(14.0))).min_size(vec2(if page { 120.0 } else { 96.0 }, bsz.y));
+        if ui.add_enabled(st.adjust != 0, b).clicked() {
+            ch.adjust_minutes(st.adjust, st.days_ago);
+            st.adjust = 0;
+        }
+        if st.adjust != 0
+            && ui.add(egui::Button::new(RichText::new("×").color(theme::MUTED)).frame(false).min_size(vec2(28.0, bsz.y))).clicked()
+        {
+            st.adjust = 0;
         }
     });
-}
-
-// ---------------------------------------------------------------- stats
-
-fn tile(ui: &mut egui::Ui, title: &str, value: String, w: f32) {
-    theme::card(ui, Margin::symmetric(12, 8), |ui| {
-        ui.set_width(w);
-        // titre au-dessus de la valeur (le cadre hérite sinon de la ligne horizontale parente)
-        ui.vertical(|ui| {
-            ui.set_width(w);
-            ui.add(egui::Label::new(RichText::new(title).font(regular(12.0)).color(theme::DIM)).truncate());
-            ui.add(egui::Label::new(RichText::new(value).font(theme::mono_bold(20.0))).truncate());
-        });
-    });
-}
-
-fn stats_panel(ui: &mut egui::Ui, ch: &Chrono) {
-    let subject = ch.subject.clone();
-    ui.horizontal(|ui| {
-        // largeur intérieure : 3 tuiles + 2 espacements, moins les marges (2×12) et bordures de chaque carte
-        let gap = ui.spacing().item_spacing.x;
-        let w = ((ui.available_width() - 2.0 * gap) / 3.0 - 26.0).clamp(56.0, 160.0);
-        tile(ui, "AUJOURD'HUI", fmt_short(ch.today_all()), w);
-        tile(ui, "CETTE SEMAINE", fmt_short(ch.week(None)), w);
-        tile(
-            ui,
-            &subject.as_deref().map_or("TOTAL".to_string(), |s| format!("TOTAL · {}", s.to_uppercase())),
-            fmt_short(ch.total(subject.as_deref())),
-            w,
-        );
-    });
-
-    ui.add_space(12.0);
-    ui.label(RichText::new("7 DERNIERS JOURS").font(bold(11.5)).color(theme::DIM));
-    let days = ch.last_days(7);
-    let max = days.iter().map(|(_, s)| *s).max().unwrap_or(0).max(3600) as f32;
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().min(560.0), 130.0), Sense::hover());
-    let p = ui.painter_at(rect);
-    let slot = rect.width() / 7.0;
-    for (i, (d, s)) in days.iter().enumerate() {
-        let x = rect.left() + slot * i as f32 + slot / 2.0;
-        let chart_h = rect.height() - 38.0;
-        let h = (*s as f32 / max * chart_h).max(if *s > 0 { 3.0 } else { 0.0 });
-        let today = i == 6;
-        let bar = egui::Rect::from_min_max(
-            pos2(x - slot * 0.28, rect.top() + 16.0 + chart_h - h),
-            pos2(x + slot * 0.28, rect.top() + 16.0 + chart_h),
-        );
-        p.rect_filled(
-            egui::Rect::from_min_max(pos2(bar.left(), rect.top() + 16.0), pos2(bar.right(), bar.bottom())),
-            CornerRadius::same(4),
-            theme::CARD,
-        );
-        if h > 0.0 {
-            p.rect_filled(bar, CornerRadius::same(4), if today { theme::ACCENT } else { theme::ACCENT.gamma_multiply(0.55) });
-        }
-        if *s > 0 {
-            p.text(pos2(x, bar.top() - 3.0), Align2::CENTER_BOTTOM, fmt_short(*s), theme::mono(10.0), theme::MUTED);
-        }
-        p.text(
-            pos2(x, rect.bottom() - 2.0),
-            Align2::CENTER_BOTTOM,
-            jour_court(*d),
-            theme::mono(10.5),
-            if today { theme::TEXT } else { theme::DIM },
-        );
-    }
-
-    let by = ch.week_by_subject();
-    if !by.is_empty() {
-        ui.add_space(12.0);
-        ui.label(RichText::new("PAR MATIÈRE · SEMAINE").font(bold(11.5)).color(theme::DIM));
-        let top = by[0].1.max(1) as f32;
-        for (s, t) in by.iter().take(8) {
-            ui.horizontal(|ui| {
-                ui.add_sized([150.0, 18.0], egui::Label::new(RichText::new(s).font(regular(13.0))).truncate());
-                let w = (ui.available_width() - 70.0).clamp(40.0, 300.0);
-                let (r, _) = ui.allocate_exact_size(vec2(w, 12.0), Sense::hover());
-                ui.painter().rect_filled(r, CornerRadius::same(4), theme::CARD);
-                let fill = egui::Rect::from_min_size(r.min, vec2((r.width() * *t as f32 / top).max(4.0), r.height()));
-                ui.painter().rect_filled(fill, CornerRadius::same(4), theme::ACCENT);
-                ui.label(RichText::new(fmt_short(*t)).font(regular(12.5)).color(theme::MUTED));
-            });
-        }
-    }
 }
 
 // ---------------------------------------------------------------- journal
@@ -416,11 +365,11 @@ fn journal(ui: &mut egui::Ui, ch: &mut Chrono, st: &mut RevUi) {
         }
         ui.horizontal(|ui| {
             let (txt, col) = match s.kind {
-                SessionKind::Adjust => (format!("−{}", fmt_short(-s.secs)), theme::NOW),
-                SessionKind::Manual => (format!("+{} (ajouté)", fmt_short(s.secs)), theme::WARN),
-                SessionKind::Work => (fmt_short(s.secs), theme::OK),
+                SessionKind::Adjust => (format!("−{}", fmt_precise(-s.secs)), theme::NOW),
+                SessionKind::Manual => (format!("+{} (ajouté)", fmt_precise(s.secs)), theme::WARN),
+                SessionKind::Work => (fmt_precise(s.secs), theme::OK),
             };
-            ui.add_sized([96.0, 18.0], egui::Label::new(RichText::new(txt).color(col)));
+            ui.add_sized([150.0, 18.0], egui::Label::new(RichText::new(txt).color(col)));
             ui.label(RichText::new(format!("{} · {}", s.subject, s.part)));
             ui.label(RichText::new(s.start.format("%H:%M").to_string()).font(regular(12.0)).color(theme::DIM));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

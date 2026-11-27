@@ -11,7 +11,7 @@
     <application
         android:label="Cydera"
         android:icon="@mipmap/ic_launcher"
-        android:hasCode="false"
+        android:hasCode="true"
         android:allowBackup="false">
         <activity
             android:name="android.app.NativeActivity"
@@ -24,5 +24,24 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Widgets d'écran d'accueil (code Java : apps/android/java, compilé par build-apk.sh). -->
+        <receiver android:name="fr.cydera.app.ChronoWidget" android:exported="true" android:label="@string/widget_chrono">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_chrono_info" />
+        </receiver>
+        <receiver android:name="fr.cydera.app.EdtWidget" android:exported="true" android:label="@string/widget_edt">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_edt_info" />
+        </receiver>
+        <!-- Appuis ▶/⏸, rafraîchissements demandés par l'app : non exporté. -->
+        <receiver android:name="fr.cydera.app.WidgetActions" android:exported="false">
+            <intent-filter>
+                <action android:name="fr.cydera.app.WIDGET_REFRESH" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

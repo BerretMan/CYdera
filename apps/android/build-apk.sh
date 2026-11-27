@@ -29,12 +29,19 @@ TARGETS=${CYDERA_ABIS:-"arm64-v8a armeabi-v7a"}
 NDK_T=(); for t in $TARGETS; do NDK_T+=(-t "$t"); done
 (cd "$ROOT" && cargo ndk "${NDK_T[@]}" -o "$OUT/lib" build -p cydera-android "${FLAGS[@]}")
 
-# Ressources + manifeste
+# Ressources + manifeste ; `--java` génère R.java (identifiants des ressources) pour le code Java.
+mkdir -p "$OUT/gen" "$OUT/classes" "$OUT/dex"
 "$BT/aapt2" compile --dir "$HERE/res" -o "$OUT/res.zip"
 "$BT/aapt2" link -o "$OUT/base.apk" -I "$ANDROID_HOME/platforms/android-34/android.jar" \
-  --manifest "$HERE/AndroidManifest.xml" "$OUT/res.zip" --auto-add-overlay \
+  --manifest "$HERE/AndroidManifest.xml" "$OUT/res.zip" --auto-add-overlay --java "$OUT/gen" \
   --version-name "$VERSION" --version-code "$VERSION_CODE" --replace-version
-# Bibliothèques natives (non compressées + alignées : requis pour hasCode=false / minSdk≥23)
+# Code Java des widgets (apps/android/java) → classes.dex, sans Gradle : javac + d8.
+javac -nowarn -Xlint:-options -source 8 -target 8 -encoding UTF-8 -bootclasspath "$ANDROID_HOME/platforms/android-34/android.jar" \
+  -d "$OUT/classes" $(find "$HERE/java" "$OUT/gen" -name '*.java')
+"$BT/d8" --min-api 26 --lib "$ANDROID_HOME/platforms/android-34/android.jar" --output "$OUT/dex" $(find "$OUT/classes" -name '*.class')
+(cd "$OUT/dex" && zip -q "$OUT/base.apk" classes.dex)
+
+# Bibliothèques natives (non compressées + alignées : requis pour une NativeActivity / minSdk≥23)
 (cd "$OUT" && zip -q -r -0 base.apk lib)
 "$BT/zipalign" -f -p 4 "$OUT/base.apk" "$OUT/aligned.apk"
 

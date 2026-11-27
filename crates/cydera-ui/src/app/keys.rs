@@ -82,6 +82,9 @@ impl App {
             if i.key_pressed(Key::Space) && self.chrono.subject.is_some() {
                 self.chrono.toggle();
             }
+            if i.key_pressed(Key::G) {
+                self.show_stats = !self.show_stats;
+            }
             if i.key_pressed(Key::E) {
                 self.show_exams = !self.show_exams;
             }
@@ -97,6 +100,7 @@ impl App {
                 } else {
                     self.show_exams = false;
                     self.show_rev = false;
+                    self.show_stats = false;
                     self.show_about = false;
                     self.show_resto = false;
                     if self.mail.show && !self.mail.close_message() {

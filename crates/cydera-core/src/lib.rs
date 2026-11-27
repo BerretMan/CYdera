@@ -11,5 +11,7 @@ pub mod model;
 pub mod net;
 pub mod platform;
 pub mod resto;
+pub mod stats;
 pub mod study;
 pub mod update;
+pub mod widget;

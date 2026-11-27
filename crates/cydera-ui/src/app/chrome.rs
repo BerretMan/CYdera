@@ -63,6 +63,7 @@ impl App {
                     Act::Exams => "E",
                     Act::Mails => "M",
                     Act::Rev => "C",
+                    Act::Stats => "G",
                     Act::Refresh => "R",
                     Act::Grades => "N",
                     Act::About | Act::Devices => "",
@@ -112,6 +113,13 @@ impl App {
                 let c = btn(ui, t, col, self.show_rev, "Chrono de révisions (C · Espace = start/pause)", true);
                 if c {
                     self.show_rev = !self.show_rev;
+                }
+                c
+            }
+            Act::Stats => {
+                let c = btn(ui, "Stats".to_string(), theme::TEXT, self.show_stats, "Statistique de révision (G)", true);
+                if c {
+                    self.show_stats = !self.show_stats;
                 }
                 c
             }
@@ -236,7 +244,7 @@ impl App {
         let label = if unread > 0 { format!("Menu ({unread})") } else { "Menu".to_string() };
         ui.menu_button(label, |ui| {
             ui.set_min_width(240.0);
-            for a in [Act::Resto, Act::Exams, Act::Grades, Act::Mails, Act::Rev, Act::Devices, Act::About, Act::Refresh] {
+            for a in [Act::Resto, Act::Exams, Act::Grades, Act::Mails, Act::Rev, Act::Stats, Act::Devices, Act::About, Act::Refresh] {
                 self.action(ui, ctx, a, true);
             }
         });
@@ -249,7 +257,9 @@ impl App {
                 ui.horizontal(|ui| {
                     self.title_block(ui, 28.0);
                     ui.with_layout(rtl, |ui| {
-                        for a in [Act::Refresh, Act::About, Act::Devices, Act::Rev, Act::Mails, Act::Resto, Act::Grades, Act::Exams] {
+                        for a in
+                            [Act::Refresh, Act::About, Act::Devices, Act::Stats, Act::Rev, Act::Mails, Act::Resto, Act::Grades, Act::Exams]
+                        {
                             self.action(ui, ctx, a, false);
                             ui.add_space(8.0);
                         }
@@ -415,6 +425,8 @@ impl App {
             Some("mail")
         } else if self.show_resto {
             Some("resto")
+        } else if self.show_stats {
+            Some("stats")
         } else if self.show_rev {
             Some("revisions")
         } else if self.show_exams {
@@ -441,6 +453,7 @@ impl App {
             }
             Some("mail") => self.mail.show = false,
             Some("resto") => self.show_resto = false,
+            Some("stats") => self.show_stats = false,
             Some("revisions") => self.show_rev = false,
             Some("exams") => self.show_exams = false,
             _ => return false,
@@ -461,6 +474,7 @@ impl App {
         self.show_about = false;
         self.show_devices = false;
         self.show_grades = false;
+        self.show_stats = false;
         self.maj.show = false;
         self.detail = None;
         ctx.request_repaint(); // l'en-tête a déjà été dessiné avec l'ancien état
@@ -487,7 +501,7 @@ impl App {
         let p2p = devices::status_line(&self.p2p.status());
         let (short, short_c) = self.sync_short();
         let can_sync = !self.syncing && self.password.is_some();
-        let rows_h = 4.0 * 52.0;
+        let rows_h = 5.0 * 52.0;
         let h = 22.0 + rows_h + 14.0 + if p2p.is_some() { 40.0 } else { 24.0 } + 12.0;
         let mut pick: Option<u8> = None;
         let mut close = false;
@@ -522,6 +536,10 @@ impl App {
             if ui::mobile::sheet_row(ui, "Resto U", "Menus du jour", theme::MUTED, true) {
                 pick = Some(5);
             }
+            let stats_detail = format!("{} cette semaine", crate::study::fmt_short(self.chrono.week(None)));
+            if ui::mobile::sheet_row(ui, "Statistique", &stats_detail, theme::MUTED, true) {
+                pick = Some(6);
+            }
             if ui::mobile::sheet_row(ui, "Appareils", &dev_detail, theme::MUTED, true) {
                 pick = Some(2);
             }
@@ -543,6 +561,7 @@ impl App {
                 2 => self.show_devices = true,
                 3 => self.maybe_sync(ctx, true),
                 5 => self.toggle_resto(ctx),
+                6 => self.show_stats = true,
                 _ => self.show_about = true,
             }
         }

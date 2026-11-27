@@ -7,6 +7,7 @@
 
 use crate::journal::{self, Event, Journal, Op, VersionVector};
 use crate::model::now;
+use crate::widget;
 use chrono::{Duration, NaiveDate, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -90,11 +91,30 @@ pub fn fmt_hms(secs: i64) -> String {
     format!("{:02}:{:02}:{:02}", s / 3600, s % 3600 / 60, s % 60)
 }
 
-/// « 2h05 » ou « 12 min ».
+/// « 2h05 », « 12 min » ou « 40 s » (sous la minute, pour ne pas afficher « 0 min »).
 pub fn fmt_short(secs: i64) -> String {
     let s = secs.max(0);
     let (h, m) = (s / 3600, s % 3600 / 60);
-    if h > 0 { format!("{h}h{m:02}") } else { format!("{m} min") }
+    if h > 0 {
+        format!("{h}h{m:02}")
+    } else if m > 0 {
+        format!("{m} min")
+    } else {
+        format!("{s} s")
+    }
+}
+
+/// Durée à la seconde : « 1h02 min 30 s », « 12 min 05 s », « 40 s ».
+pub fn fmt_precise(secs: i64) -> String {
+    let s = secs.max(0);
+    let (h, m, sec) = (s / 3600, s % 3600 / 60, s % 60);
+    if h > 0 {
+        format!("{h}h{m:02} min {sec:02} s")
+    } else if m > 0 {
+        format!("{m} min {sec:02} s")
+    } else {
+        format!("{sec} s")
+    }
 }
 
 impl Chrono {
@@ -205,10 +225,27 @@ impl Chrono {
     }
 
     /// Si l'app a été tuée pendant un chrono, on garde le temps jusqu'au dernier checkpoint.
+    /// Exception : des appuis sur le widget attendent (▶/⏸ app fermée). Le widget montrait ce
+    /// chrono comme lancé, on le reprend donc tel quel avant de rejouer les appuis.
     fn recover(&mut self) {
         let st: Option<RunState> =
             dir().and_then(|d| std::fs::read_to_string(d.join("revisions-state.json")).ok()).and_then(|s| serde_json::from_str(&s).ok());
-        let Some(st) = st.filter(|s| s.running) else { return };
+        let cmds = widget::take_commands();
+        let Some(st) = st.filter(|s| s.running) else {
+            self.apply_widget(cmds);
+            return;
+        };
+        if !cmds.is_empty() && !st.subject.is_empty() {
+            self.subject = Some(st.subject);
+            self.part = st.part;
+            self.start_dt = st.start;
+            self.started = Some(Instant::now());
+            self.apply_widget(cmds);
+            if self.running() {
+                self.write_state(true);
+            }
+            return;
+        }
         let secs = (st.checkpoint - st.start).num_seconds();
         if secs > 0 {
             self.record(st.start, st.checkpoint, &st.subject, &st.part, SessionKind::Work);
@@ -291,20 +328,30 @@ impl Chrono {
     }
 
     pub fn start(&mut self) {
+        self.start_at(now());
+    }
+
+    /// Lance le chrono comme s'il avait démarré à `t` (appui sur le widget, app fermée).
+    pub fn start_at(&mut self, t: NaiveDateTime) {
         if self.running() || self.subject.is_none() {
             return;
         }
-        self.start_dt = now().with_nanosecond_zero();
+        self.start_dt = t.with_nanosecond_zero();
         self.started = Some(Instant::now());
         self.last_ckpt = Instant::now();
         self.write_state(true);
     }
 
     pub fn pause(&mut self) {
+        self.pause_at(now());
+    }
+
+    /// Arrête le chrono à l'instant `t` (jamais avant son début).
+    pub fn pause_at(&mut self, t: NaiveDateTime) {
         if !self.running() {
             return;
         }
-        let (start, end) = (self.start_dt, now().with_nanosecond_zero());
+        let (start, end) = (self.start_dt, t.with_nanosecond_zero().max(self.start_dt));
         self.started = None;
         if let Some(s) = self.subject.clone() {
             let part = self.part.clone();
@@ -318,6 +365,32 @@ impl Chrono {
             self.pause();
         } else {
             self.start();
+        }
+    }
+
+    /// Rejoue les appuis ▶/⏸ du widget, à leur heure. Renvoie vrai si l'état a changé.
+    pub fn apply_widget(&mut self, cmds: Vec<(NaiveDateTime, widget::Cmd)>) -> bool {
+        let before = (self.running(), self.data.sessions.len());
+        for (t, c) in cmds {
+            match c {
+                widget::Cmd::Start => self.start_at(t),
+                widget::Cmd::Pause => self.pause_at(t),
+            }
+        }
+        before != (self.running(), self.data.sessions.len())
+    }
+
+    /// État affiché par le widget « Chrono ».
+    pub fn widget_state(&self) -> widget::ChronoState {
+        let d = now().date();
+        let subject = self.subject.clone().unwrap_or_default();
+        widget::ChronoState {
+            today_secs: if subject.is_empty() { 0 } else { self.sum(Some(&subject), d, d).max(0) },
+            subject,
+            part: self.part.clone(),
+            running: self.running(),
+            start_ms: if self.running() { widget::to_ms(self.start_dt) } else { 0 },
+            day: d.to_string(),
         }
     }
 
@@ -343,17 +416,29 @@ impl Chrono {
         self.record(end - Duration::seconds(secs), end, &s, &part, SessionKind::Manual);
     }
 
-    /// Retire des minutes au temps du jour de la matière sélectionnée.
-    pub fn subtract_minutes(&mut self, minutes: i64) {
+    /// Retire des minutes au temps de la matière sélectionnée, sur aujourd'hui (`days_ago` = 0),
+    /// hier… Sans descendre sous zéro pour ce jour-là.
+    pub fn subtract_minutes(&mut self, minutes: i64, days_ago: i64) {
         let Some(s) = self.subject.clone() else { return };
-        let part = self.part.clone();
-        let rsec = (minutes * 60).min(self.today(&s));
+        let day = now().date() - Duration::days(days_ago);
+        let have = if days_ago == 0 { self.today(&s) } else { self.sum(Some(&s), day, day).max(0) };
+        let rsec = (minutes * 60).min(have);
         if rsec <= 0 {
             return;
         }
-        let t = now().with_nanosecond_zero();
+        let t = if days_ago == 0 { now().with_nanosecond_zero() } else { day.and_hms_opt(23, 59, 59).unwrap() };
+        let part = self.part.clone();
         self.emit(Op::SessionAdd(Session { id: new_id(), start: t, end: t, secs: -rsec, subject: s, part, kind: SessionKind::Adjust }));
         self.save();
+    }
+
+    /// Applique un réglage signé du sélecteur : > 0 ajoute, < 0 retire.
+    pub fn adjust_minutes(&mut self, minutes: i64, days_ago: i64) {
+        if minutes > 0 {
+            self.add_minutes(minutes, days_ago);
+        } else if minutes < 0 {
+            self.subtract_minutes(-minutes, days_ago);
+        }
     }
 
     pub fn delete(&mut self, id: &str) {
@@ -414,6 +499,26 @@ impl Chrono {
     // ---------- totaux ----------
     pub fn sessions(&self) -> &[Session] {
         &self.data.sessions
+    }
+
+    /// Sessions enregistrées + la session en cours (jusqu'à maintenant), pour les statistiques.
+    pub fn sessions_with_live(&self) -> Vec<Session> {
+        let mut v = self.data.sessions.clone();
+        if let (Some(subject), true) = (&self.subject, self.running()) {
+            let end = now().with_nanosecond_zero();
+            if end > self.start_dt {
+                v.push(Session {
+                    id: "live".into(),
+                    start: self.start_dt,
+                    end,
+                    secs: (end - self.start_dt).num_seconds(),
+                    subject: subject.clone(),
+                    part: self.part.clone(),
+                    kind: SessionKind::Work,
+                });
+            }
+        }
+        v
     }
 
     /// Matières connues par les sessions et ajouts manuels.
@@ -498,5 +603,23 @@ impl ZeroNanos for NaiveDateTime {
     fn with_nanosecond_zero(self) -> Self {
         use chrono::Timelike;
         self.with_nanosecond(0).unwrap_or(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formats() {
+        assert_eq!(fmt_short(0), "0 s");
+        assert_eq!(fmt_short(40), "40 s");
+        assert_eq!(fmt_short(60), "1 min");
+        assert_eq!(fmt_short(725), "12 min");
+        assert_eq!(fmt_short(7500), "2h05");
+        assert_eq!(fmt_precise(40), "40 s");
+        assert_eq!(fmt_precise(725), "12 min 05 s");
+        assert_eq!(fmt_precise(3750), "1h02 min 30 s");
+        assert_eq!(fmt_precise(-5), "0 s");
     }
 }
