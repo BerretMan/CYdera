@@ -23,7 +23,7 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       prerelease: ${{ steps.v.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: v
         run: |
           V=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
@@ -39,7 +39,7 @@ jobs:
     needs: verifier
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_VERSION }}
@@ -63,7 +63,7 @@ jobs:
           cp packaging/linux/cydera.desktop packaging/linux/install.sh "$D/"
           tar czf "$D.tar.gz" "$D"
           tar tzf "$D.tar.gz"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux
           path: cydera-linux-x86_64.tar.gz
@@ -75,12 +75,12 @@ jobs:
     # Les secrets de signature ne sont exposés qu'à cet environnement.
     environment: release
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
         with:
           packages: platforms;android-34 build-tools;34.0.0 ndk;${{ env.NDK_VERSION }}
       - uses: dtolnay/rust-toolchain@master
@@ -115,7 +115,7 @@ jobs:
           "$BT/apksigner" verify --print-certs target/apk/release/cydera.apk | grep -E "SHA-256|DN"
           "$BT/aapt2" dump badging target/apk/release/cydera.apk | head -1
           "$BT/aapt2" dump badging target/apk/release/cydera.apk | grep -q "versionName='${{ needs.verifier.outputs.version }}'"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android
           path: target/apk/release/cydera.apk
@@ -129,10 +129,10 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -141,7 +141,7 @@ jobs:
         run: |
           sha256sum cydera.apk cydera-linux-x86_64.tar.gz > SHA256SUMS
           cat SHA256SUMS
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             dist/cydera.apk
@@ -160,7 +160,7 @@ jobs:
             echo
             echo "Vérification : \`sha256sum -c SHA256SUMS\` ou \`gh attestation verify <fichier> -R $GITHUB_REPOSITORY\`."
           } > notes.md
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           name: Cydera ${{ needs.verifier.outputs.version }}
           body_path: notes.md
