@@ -30,6 +30,8 @@ pub enum Op {
         id: String,
     },
     CustomAdd(String),
+    /// Suppression d'une matière ajoutée à la main (ses sessions sont supprimées à part).
+    CustomDel(String),
     /// Création ou nouvelle version d'un profil de notes (structure UE/EC complète).
     ProfileSave {
         profile: Profile,
@@ -184,6 +186,7 @@ impl Journal {
             match &e.op {
                 Op::SessionAdd(s) if !deleted.contains(s.id.as_str()) && seen.insert(s.id.clone()) => st.sessions.push(s.clone()),
                 Op::CustomAdd(c) if !st.custom.contains(c) => st.custom.push(c.clone()),
+                Op::CustomDel(c) => st.custom.retain(|x| x != c),
                 _ => {}
             }
         }
@@ -350,5 +353,15 @@ mod tests {
         let back: Journal = serde_json::from_str::<Journal>(&json).unwrap().reindex();
         assert_eq!(back.version().get("pc"), Some(&2));
         assert_eq!(back.state().custom, ["A", "B"]);
+    }
+
+    #[test]
+    fn matiere_supprimee_puis_rajoutee() {
+        let mut pc = Journal::new("pc".into());
+        pc.emit(Op::CustomAdd("Maths".into()));
+        pc.emit(Op::CustomDel("Maths".into()));
+        assert!(pc.state().custom.is_empty());
+        pc.emit(Op::CustomAdd("Maths".into()));
+        assert_eq!(pc.state().custom, ["Maths"]);
     }
 }

@@ -1,6 +1,6 @@
 //! Interface partagée Desktop / Android. Les modules métier sont ré-exportés
 //! pour que `crate::model`, `crate::config`… restent valides ici.
-pub use cydera_core::{cache, celcat, config, grades, mail, model, resto, study};
+pub use cydera_core::{cache, celcat, config, grades, mail, mail_cache, model, resto, study};
 
 pub mod app;
 pub mod clipboard;

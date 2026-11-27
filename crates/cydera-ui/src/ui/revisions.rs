@@ -20,6 +20,8 @@ pub struct RevUi {
     pub days_ago: i64,
     pub new_subject: String,
     pub show_journal: bool,
+    /// Matière dont la suppression attend confirmation.
+    pub confirm_del: Option<String>,
 }
 
 fn jours_avant(d: NaiveDate) -> i64 {
@@ -85,13 +87,13 @@ fn subject_list(ui: &mut egui::Ui, ch: &mut Chrono, st: &mut RevUi, exams: &[Exa
     ui.label(RichText::new("MATIÈRES").font(bold(11.5)).color(theme::DIM));
     ui.add_space(2.0);
     let part = ch.part.clone();
-    let mut action: Option<(String, bool)> = None; // (matière, démarrer ?)
+    let mut action: Option<(String, u8)> = None; // (matière, 0 sélectionner · 1 lancer/arrêter · 2 supprimer)
 
     egui::ScrollArea::vertical().id_salt("rev_list").auto_shrink([false, false]).max_height(max_h).show(ui, |ui| {
         if !exams.is_empty() {
             ui.label(RichText::new("Examens à venir").color(theme::MUTED));
             for e in exams {
-                if let Some(a) = row(ui, ch, &e.subject, Some(e.date)) {
+                if let Some(a) = row(ui, ch, &e.subject, Some(e.date), false) {
                     action = Some(a);
                 }
             }
@@ -101,7 +103,7 @@ fn subject_list(ui: &mut egui::Ui, ch: &mut Chrono, st: &mut RevUi, exams: &[Exa
             ui.add_space(8.0);
             ui.label(RichText::new("Autres matières").color(theme::MUTED));
             for s in others {
-                if let Some(a) = row(ui, ch, &s, None) {
+                if let Some(a) = row(ui, ch, &s, None, true) {
                     action = Some(a);
                 }
             }
@@ -110,6 +112,29 @@ fn subject_list(ui: &mut egui::Ui, ch: &mut Chrono, st: &mut RevUi, exams: &[Exa
             ui.label(RichText::new("Aucun examen dans l'emploi du temps : ajoute une matière ci-dessous.").color(theme::MUTED));
         }
     });
+
+    if let Some(name) = st.confirm_del.clone() {
+        ui.add_space(6.0);
+        theme::card(ui, Margin::symmetric(10, 8), |ui| {
+            ui.set_width(ui.available_width());
+            let n = ch.session_count(&name);
+            let sessions = match n {
+                0 => String::new(),
+                1 => " et sa session".to_string(),
+                n => format!(" et ses {n} sessions"),
+            };
+            ui.add(egui::Label::new(RichText::new(format!("Supprimer « {name} »{sessions} ?")).color(theme::WARN)).wrap());
+            ui.horizontal(|ui| {
+                if ui.button("Supprimer").clicked() {
+                    ch.delete_subject(&name);
+                    st.confirm_del = None;
+                }
+                if ui.button("Annuler").clicked() {
+                    st.confirm_del = None;
+                }
+            });
+        });
+    }
 
     ui.add_space(6.0);
     ui.horizontal(|ui| {
@@ -122,20 +147,21 @@ fn subject_list(ui: &mut egui::Ui, ch: &mut Chrono, st: &mut RevUi, exams: &[Exa
         }
     });
 
-    if let Some((s, start)) = action {
-        if start && ch.is_running_on(&s) {
-            ch.pause();
-        } else {
-            ch.select(&s, &part, start);
+    if let Some((s, kind)) = action {
+        match kind {
+            2 => st.confirm_del = Some(s),
+            1 if ch.is_running_on(&s) => ch.pause(),
+            k => ch.select(&s, &part, k == 1),
         }
     }
 }
 
 /// Une ligne de matière. Clic = sélectionner, bouton ▶/⏸ = lancer/arrêter.
-fn row(ui: &mut egui::Ui, ch: &Chrono, subject: &str, exam: Option<NaiveDate>) -> Option<(String, bool)> {
+fn row(ui: &mut egui::Ui, ch: &Chrono, subject: &str, exam: Option<NaiveDate>, deletable: bool) -> Option<(String, u8)> {
     let selected = ch.subject.as_deref() == Some(subject);
     let running = ch.is_running_on(subject);
     let mut btn_rect = egui::Rect::NOTHING;
+    let mut del_rect = egui::Rect::NOTHING;
     let fill = if running {
         theme::OK.gamma_multiply(0.14)
     } else if selected {
@@ -166,6 +192,11 @@ fn row(ui: &mut egui::Ui, ch: &Chrono, subject: &str, exam: Option<NaiveDate>) -
                 let sz = if super::page::is_page(ui.ctx()) { vec2(48.0, 40.0) } else { vec2(34.0, 30.0) };
                 let b = ui.add(egui::Button::new(RichText::new(icon).color(col).font(bold(15.0))).min_size(sz));
                 btn_rect = b.rect;
+                if deletable {
+                    let sz = if super::page::is_page(ui.ctx()) { vec2(40.0, 40.0) } else { vec2(26.0, 30.0) };
+                    let d = ui.add(egui::Button::new(RichText::new("×").color(theme::MUTED).font(bold(13.0))).frame(false).min_size(sz));
+                    del_rect = d.rect;
+                }
             });
         });
     })
@@ -175,8 +206,9 @@ fn row(ui: &mut egui::Ui, ch: &Chrono, subject: &str, exam: Option<NaiveDate>) -
     let resp = ui.interact(rect, ui.id().with(("rev_row", subject)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
     ui.add_space(3.0);
     if resp.clicked() {
-        let on_btn = resp.interact_pointer_pos().is_some_and(|p| btn_rect.contains(p));
-        return Some((subject.to_string(), on_btn));
+        let pos = resp.interact_pointer_pos();
+        let kind = if pos.is_some_and(|p| del_rect.contains(p)) { 2 } else { u8::from(pos.is_some_and(|p| btn_rect.contains(p))) };
+        return Some((subject.to_string(), kind));
     }
     None
 }

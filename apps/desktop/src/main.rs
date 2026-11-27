@@ -49,7 +49,7 @@ fn main() -> eframe::Result {
             std::process::exit(1);
         };
         match rt.block_on(mail::body(&cfg.mail_host, &cfg.mail_user, &pwd, id)) {
-            Ok(t) => println!("{t}"),
+            Ok(t) => println!("{}", t.plain()),
             Err(e) => {
                 eprintln!("Erreur : {e}");
                 std::process::exit(1);
@@ -58,14 +58,23 @@ fn main() -> eframe::Result {
         return Ok(());
     }
 
-    // `cydera --mail` : liste la boîte de réception sans interface.
+    // `cydera --mail [--folder sent|drafts|junk|trash] [--search texte]` : liste un dossier sans interface.
     if std::env::args().any(|a| a == "--mail") {
         let cfg = config::Config::load();
         let Some(pwd) = config::load_mail_password() else {
             eprintln!("Mot de passe mail introuvable (CYU_MAIL_PASSWORD ou ~/CYU_MAIL_PASSWORD)");
             std::process::exit(1);
         };
-        match rt.block_on(mail::list(&cfg.mail_host, &cfg.mail_user, &pwd, 20)) {
+        let arg = |k: &str| std::env::args().skip_while(|a| a != k).nth(1);
+        let folder = match arg("--folder").as_deref() {
+            Some("sent") => mail::Folder::Sent,
+            Some("drafts") => mail::Folder::Drafts,
+            Some("junk") => mail::Folder::Junk,
+            Some("trash") => mail::Folder::Trash,
+            _ => mail::Folder::Inbox,
+        };
+        let search = arg("--search").unwrap_or_default();
+        match rt.block_on(mail::list(&cfg.mail_host, &cfg.mail_user, &pwd, folder, &search, 20)) {
             Ok(l) => l
                 .iter()
                 .for_each(|m| println!("{} {:>7} {:<12} {:<24} {}", if m.unread { "●" } else { " " }, m.uid, m.date, m.from, m.subject)),

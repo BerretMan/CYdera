@@ -38,7 +38,9 @@ pub fn bandeau(ui: &mut egui::Ui, rel: &Release, mobile: bool) -> Option<Action>
     let mut action = None;
     theme::card(ui, Margin::symmetric(12, 8), |ui| {
         ui.set_width(ui.available_width());
-        let titre = RichText::new(format!("Cydera {} est disponible", rel.version)).font(bold(14.0)).color(theme::ACCENT);
+        let titre = RichText::new(format!("Mise à jour disponible : Cydera {} (installée : {})", rel.version, env!("CARGO_PKG_VERSION")))
+            .font(bold(14.0))
+            .color(theme::ACCENT);
         let boutons = |ui: &mut egui::Ui, action: &mut Option<Action>| {
             if bouton(ui, "Installer", true, mobile) {
                 *action = Some(Action::Ouvrir);
@@ -145,6 +147,7 @@ pub fn page(ctx: &egui::Context, maj: &mut Maj) -> Option<Action> {
         .default_width(440.0_f32.min(ctx.content_rect().width() - 24.0));
     page::show(ctx, egui::Id::new("update"), "Mise à jour", win, Some(&mut open), true, |ui| {
         let grand = page::is_page(ctx);
+        ui.label(RichText::new("Mise à jour disponible").font(bold(13.0)).color(theme::DIM));
         ui.label(RichText::new(format!("Cydera {}", rel.version)).font(bold(24.0)).color(theme::ACCENT));
         let mut infos = format!("Version installée : {}", env!("CARGO_PKG_VERSION"));
         if let Some(a) = rel.paquet() {
@@ -185,7 +188,11 @@ pub fn apropos(ui: &mut egui::Ui, maj: &Maj, auto: &mut bool) -> Option<Action> 
                 ui.label(RichText::new("Vérification…").color(theme::MUTED));
             });
         } else if let Some(r) = &maj.dispo {
-            ui.label(RichText::new(format!("Version {} disponible", r.version)).font(bold(14.0)).color(theme::ACCENT));
+            ui.label(
+                RichText::new(format!("Mise à jour disponible : version {} (installée : {})", r.version, env!("CARGO_PKG_VERSION")))
+                    .font(bold(14.0))
+                    .color(theme::ACCENT),
+            );
             ui.add_space(4.0);
             if matches!(maj.install, Install::Rien) {
                 if bouton(ui, "Installer la mise à jour", true, grand) {

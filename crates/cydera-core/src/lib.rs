@@ -6,6 +6,7 @@ pub mod files;
 pub mod grades;
 pub mod journal;
 pub mod mail;
+pub mod mail_cache;
 pub mod model;
 pub mod net;
 pub mod platform;

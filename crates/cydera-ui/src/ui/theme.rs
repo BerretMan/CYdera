@@ -41,6 +41,24 @@ pub const EXAM: Color32 = Color32::from_rgb(0xD4, 0xF0, 0x00); // lime
 pub const INDISPO: Color32 = Color32::from_rgb(0xEA, 0xB3, 0x08);
 pub const AUTRE: Color32 = Color32::from_rgb(0x22, 0xC5, 0x5E);
 
+// ---- Lecture des mails : palette du thème Obsidian « Royal Velvet » (sombre, luminosité 75 %) ----
+/// Gras (`strong` de Royal Velvet, hsl 330 100 % 75 %).
+pub const VELVET_PINK: Color32 = Color32::from_rgb(0xFF, 0x80, 0xC0);
+/// Italique.
+pub const VELVET_BLUE: Color32 = Color32::from_rgb(0x80, 0xFF, 0xEA);
+/// Gras + italique, bord des citations.
+pub const VELVET_RED: Color32 = Color32::from_rgb(0xFF, 0x95, 0x80);
+/// Expéditeur.
+pub const VELVET_ORANGE: Color32 = Color32::from_rgb(0xFF, 0xCA, 0x80);
+/// Copies (Cc).
+pub const VELVET_PURPLE: Color32 = Color32::from_rgb(0x95, 0x80, 0xFF);
+/// Sujet.
+pub const VELVET_ORCHID: Color32 = Color32::from_rgb(0xDF, 0x80, 0xFF);
+/// Destinataires.
+pub const VELVET_GREEN: Color32 = Color32::from_rgb(0x8B, 0xFF, 0x80);
+/// Texte courant (crème, moins dur que le blanc pur sur un long texte).
+pub const VELVET_TEXT: Color32 = Color32::from_rgb(0xF8, 0xF8, 0xF2);
+
 /// Angles quasi droits partout (≤ 4 px).
 pub const RADIUS: u8 = 3;
 

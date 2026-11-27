@@ -154,6 +154,7 @@ impl Chrono {
             Op::SessionAdd(s) => self.data.sessions.push(s.clone()),
             Op::SessionDel { id } => self.data.sessions.retain(|s| &s.id != id),
             Op::CustomAdd(c) => self.data.custom.push(c.clone()),
+            Op::CustomDel(c) => self.data.custom.retain(|x| x != c),
             _ => {} // opérations des notes : gérées par `grades::Book`
         }
         self.jr().emit(op);
@@ -371,6 +372,31 @@ impl Chrono {
             self.data.sessions.sort_by(|a, b| (a.start, &a.id).cmp(&(b.start, &b.id)));
             self.save();
         }
+    }
+
+    /// Nombre de sessions enregistrées pour une matière.
+    pub fn session_count(&self, subject: &str) -> usize {
+        self.data.sessions.iter().filter(|s| s.subject == subject).count()
+    }
+
+    /// Supprime une matière et toutes ses sessions (synchronisé avec les autres appareils).
+    pub fn delete_subject(&mut self, subject: &str) {
+        if self.is_running_on(subject) {
+            self.pause();
+        }
+        let ids: Vec<String> = self.data.sessions.iter().filter(|s| s.subject == subject).map(|s| s.id.clone()).collect();
+        for id in ids {
+            self.emit(Op::SessionDel { id });
+        }
+        self.emit(Op::CustomDel(subject.to_string()));
+        if self.subject.as_deref() == Some(subject) {
+            self.subject = None;
+        }
+        if self.data.last.as_ref().is_some_and(|l| l.0 == subject) {
+            self.data.last = None;
+        }
+        self.undo = None;
+        self.save();
     }
 
     pub fn add_custom(&mut self, name: &str) {

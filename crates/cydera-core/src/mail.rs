@@ -12,6 +12,7 @@
 
 use reqwest::Url;
 use reqwest::cookie::{CookieStore, Jar};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -29,13 +30,176 @@ pub enum Error {
     Expired,
 }
 
-#[derive(Clone, Debug)]
+/// Dossier Zimbra affichable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Folder {
+    #[default]
+    Inbox,
+    Sent,
+    Drafts,
+    Junk,
+    Trash,
+}
+
+impl Folder {
+    pub const ALL: [Folder; 5] = [Folder::Inbox, Folder::Sent, Folder::Drafts, Folder::Junk, Folder::Trash];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Folder::Inbox => "Réception",
+            Folder::Sent => "Envoyés",
+            Folder::Drafts => "Brouillons",
+            Folder::Junk => "Spams",
+            Folder::Trash => "Corbeille",
+        }
+    }
+
+    /// Requête de recherche Zimbra.
+    fn query(self) -> &'static str {
+        match self {
+            Folder::Inbox => "in:inbox",
+            Folder::Sent => "in:sent",
+            Folder::Drafts => "in:drafts",
+            Folder::Junk => "in:junk",
+            Folder::Trash => "in:trash",
+        }
+    }
+
+    /// Dossiers où l'on affiche le destinataire plutôt que l'expéditeur.
+    pub fn shows_recipient(self) -> bool {
+        matches!(self, Folder::Sent | Folder::Drafts)
+    }
+
+    /// Identifiant Zimbra du dossier système.
+    fn zimbra_id(self) -> &'static str {
+        match self {
+            Folder::Inbox => "2",
+            Folder::Trash => "3",
+            Folder::Junk => "4",
+            Folder::Sent => "5",
+            Folder::Drafts => "6",
+        }
+    }
+
+    pub fn empty_label(self) -> &'static str {
+        match self {
+            Folder::Inbox => "Boîte de réception vide.",
+            Folder::Sent => "Aucun message envoyé.",
+            Folder::Drafts => "Aucun brouillon.",
+            Folder::Junk => "Aucun spam.",
+            Folder::Trash => "La corbeille est vide.",
+        }
+    }
+}
+
+/// Action sur un message (`MsgActionRequest`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MsgAction {
+    Read,
+    Unread,
+    /// Déplacer dans la corbeille.
+    Trash,
+    /// Signaler comme spam (déplace dans « Spams »).
+    Spam,
+    /// Pas un spam : retour dans la boîte de réception.
+    NotSpam,
+    /// Ramener dans un dossier (ex. restaurer depuis la corbeille).
+    Move(Folder),
+}
+
+impl MsgAction {
+    fn request(self, uid: u32) -> Value {
+        let (op, l) = match self {
+            MsgAction::Read => ("read", None),
+            MsgAction::Unread => ("!read", None),
+            MsgAction::Trash => ("trash", None),
+            MsgAction::Spam => ("spam", None),
+            MsgAction::NotSpam => ("!spam", Some(Folder::Inbox.zimbra_id())),
+            MsgAction::Move(f) => ("move", Some(f.zimbra_id())),
+        };
+        let mut action = json!({ "id": uid.to_string(), "op": op });
+        if let Some(l) = l {
+            action["l"] = json!(l);
+        }
+        json!({ "_jsns": "urn:zimbraMail", "action": action })
+    }
+}
+
+/// Requête de recherche Zimbra : le dossier, plus le texte saisi (mots-clés, « from:… »…).
+fn search_query(folder: Folder, text: &str) -> String {
+    let t = text.trim();
+    if t.is_empty() { folder.query().to_string() } else { format!("{} ({t})", folder.query()) }
+}
+
+/// Portion de texte d'un message avec sa mise en forme.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Span {
+    pub text: String,
+    pub bold: bool,
+    pub italic: bool,
+    pub link: Option<String>,
+}
+
+/// Une ligne (ou un paragraphe, à renvoyer à la ligne) du message ; vide = ligne blanche.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Line {
+    pub spans: Vec<Span>,
+    /// Niveau de citation (« > »).
+    pub quote: u8,
+    pub bullet: bool,
+}
+
+/// Corps d'un message mis en forme.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Body {
+    pub lines: Vec<Line>,
+}
+
+impl Body {
+    /// Texte brut (pour la ligne de commande).
+    pub fn plain(&self) -> String {
+        self.lines
+            .iter()
+            .map(|l| {
+                let t: String = l.spans.iter().map(|s| s.text.as_str()).collect();
+                format!("{}{}{}", "> ".repeat(l.quote as usize), if l.bullet { "• " } else { "" }, t)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+/// Correspondant : nom affiché (peut être vide) et adresse.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Contact {
+    pub name: String,
+    pub addr: String,
+}
+
+impl Contact {
+    /// Le nom s'il est connu, sinon l'adresse.
+    pub fn label(&self) -> &str {
+        if self.name.is_empty() { &self.addr } else { &self.name }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Header {
     pub uid: u32,
+    /// Résumé pour la liste : l'expéditeur, ou « À : … » dans Envoyés / Brouillons.
     pub from: String,
     pub subject: String,
     pub date: String,
     pub unread: bool,
+    #[serde(default)]
+    pub sender: Option<Contact>,
+    #[serde(default)]
+    pub to: Vec<Contact>,
+    #[serde(default)]
+    pub cc: Vec<Contact>,
+    /// Date d'envoi (ms Unix), 0 si inconnue.
+    #[serde(default)]
+    pub ts: i64,
 }
 
 #[derive(Clone)]
@@ -314,19 +478,34 @@ async fn soap(s: &Session, name: &str, req: Value) -> Result<Value, Error> {
 }
 
 /// `SearchResponse` → en-têtes, du plus récent au plus ancien.
-fn parse_search(body: &Value) -> Vec<Header> {
+fn parse_search(body: &Value, folder: Folder) -> Vec<Header> {
     let Some(ms) = body.pointer("/SearchResponse/m").and_then(Value::as_array) else { return vec![] };
     ms.iter()
         .filter_map(|m| {
             let uid =
                 m.get("id").and_then(|v| v.as_str().map(str::to_string).or_else(|| v.as_u64().map(|n| n.to_string())))?.parse().ok()?;
-            let from = m
-                .get("e")
-                .and_then(Value::as_array)
-                .and_then(|es| es.iter().find(|e| e.get("t").and_then(Value::as_str) == Some("f")))
-                .and_then(|e| e.get("p").or_else(|| e.get("a")).and_then(Value::as_str))
-                .unwrap_or("")
-                .to_string();
+            let es: &[Value] = m.get("e").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+            let contacts = |t: &str| -> Vec<Contact> {
+                es.iter()
+                    .filter(|e| e.get("t").and_then(Value::as_str) == Some(t))
+                    .map(|e| {
+                        let addr = e.get("a").and_then(Value::as_str).unwrap_or("").to_string();
+                        let name = e.get("p").and_then(Value::as_str).map(clean_from).unwrap_or_default();
+                        Contact { name: if name == addr { String::new() } else { name }, addr }
+                    })
+                    .collect()
+            };
+            let (sender, to, cc) = (contacts("f").into_iter().next(), contacts("t"), contacts("c"));
+            let from = if folder.shows_recipient() {
+                if to.is_empty() {
+                    "(sans destinataire)".to_string()
+                } else {
+                    format!("À : {}", to.iter().map(Contact::label).collect::<Vec<_>>().join(", "))
+                }
+            } else {
+                sender.as_ref().map(|c| c.label().to_string()).unwrap_or_default()
+            };
+            let ts = m.get("d").and_then(Value::as_i64).unwrap_or(0);
             let date = m
                 .get("d")
                 .and_then(Value::as_i64)
@@ -335,32 +514,38 @@ fn parse_search(body: &Value) -> Vec<Header> {
                 .unwrap_or_default();
             Some(Header {
                 uid,
-                from: clean_from(&from),
-                subject: m.get("su").and_then(Value::as_str).unwrap_or("(sans objet)").to_string(),
+                from,
+                subject: m.get("su").and_then(Value::as_str).filter(|s| !s.trim().is_empty()).unwrap_or("(sans objet)").to_string(),
                 date,
                 unread: m.get("f").and_then(Value::as_str).is_some_and(|f| f.contains('u')),
+                sender,
+                to,
+                cc,
+                ts,
             })
         })
         .collect()
 }
 
-async fn search(s: &Session, count: u32) -> Result<Vec<Header>, Error> {
+async fn search(s: &Session, folder: Folder, text: &str, count: u32) -> Result<Vec<Header>, Error> {
     let body = soap(
         s,
         "SearchRequest",
         json!({
             "_jsns": "urn:zimbraMail",
             "types": "message",
-            "query": "in:inbox",
+            "query": search_query(folder, text),
+            // destinataires en plus de l'expéditeur (sinon Zimbra ne renvoie que le second)
+            "recip": "2",
             "sortBy": "dateDesc",
             "limit": count,
         }),
     )
     .await?;
-    Ok(parse_search(&body))
+    Ok(parse_search(&body, folder))
 }
 
-async fn raw_message(s: &Session, uid: u32) -> Result<String, Error> {
+async fn raw_message(s: &Session, uid: u32) -> Result<Body, Error> {
     let url = s.base.join(&format!("service/home/~/?id={uid}")).map_err(|e| Error::Server(e.to_string()))?;
     let res = s.client.get(url).send().await?;
     if matches!(res.status().as_u16(), 401 | 403) {
@@ -371,21 +556,33 @@ async fn raw_message(s: &Session, uid: u32) -> Result<String, Error> {
     }
     let raw = res.bytes().await?;
     let mail = mailparse::parse_mail(&raw).map_err(|e| Error::Server(e.to_string()))?;
-    Ok(extract_text(&mail).unwrap_or_else(|| "(message sans contenu texte)".into()))
+    Ok(extract_body(&mail))
 }
 
-/// Derniers `count` messages de la boîte de réception, du plus récent au plus ancien.
+/// Derniers `count` messages d'un dossier, du plus récent au plus ancien.
 /// `host` : adresse du webmail (ex. `mail.etu.cyu.fr`) ; `user` / `pass` : identifiants ENT.
-pub async fn list(host: &str, user: &str, pass: &str, count: u32) -> Result<Vec<Header>, Error> {
+/// `text` : recherche libre dans ce dossier (vide = tout).
+pub async fn list(host: &str, user: &str, pass: &str, folder: Folder, text: &str, count: u32) -> Result<Vec<Header>, Error> {
     let s = session(host, user, pass, false).await?;
-    match search(&s, count).await {
-        Err(Error::Expired) => search(&session(host, user, pass, true).await?, count).await,
+    match search(&s, folder, text, count).await {
+        Err(Error::Expired) => search(&session(host, user, pass, true).await?, folder, text, count).await,
         r => r,
     }
 }
 
-/// Corps texte d'un message (sans le marquer comme lu).
-pub async fn body(host: &str, user: &str, pass: &str, uid: u32) -> Result<String, Error> {
+/// Applique une action à un message (lu / non lu, corbeille, spam…).
+pub async fn action(host: &str, user: &str, pass: &str, uid: u32, act: MsgAction) -> Result<(), Error> {
+    let req = act.request(uid);
+    let s = session(host, user, pass, false).await?;
+    let r = match soap(&s, "MsgActionRequest", req.clone()).await {
+        Err(Error::Expired) => soap(&session(host, user, pass, true).await?, "MsgActionRequest", req).await,
+        r => r,
+    };
+    r.map(|_| ())
+}
+
+/// Corps mis en forme d'un message (sans le marquer comme lu).
+pub async fn body(host: &str, user: &str, pass: &str, uid: u32) -> Result<Body, Error> {
     let s = session(host, user, pass, false).await?;
     match raw_message(&s, uid).await {
         Err(Error::Expired) => raw_message(&session(host, user, pass, true).await?, uid).await,
@@ -393,69 +590,242 @@ pub async fn body(host: &str, user: &str, pass: &str, uid: u32) -> Result<String
     }
 }
 
-fn extract_text(m: &mailparse::ParsedMail) -> Option<String> {
-    let find = |mime: &str| -> Option<String> {
-        let mut stack = vec![m];
-        while let Some(p) = stack.pop() {
-            if p.subparts.is_empty() && p.ctype.mimetype.eq_ignore_ascii_case(mime) {
-                return p.get_body().ok();
-            }
-            stack.extend(p.subparts.iter().rev());
+fn find_part(m: &mailparse::ParsedMail, mime: &str) -> Option<String> {
+    let mut stack = vec![m];
+    while let Some(p) = stack.pop() {
+        if p.subparts.is_empty() && p.ctype.mimetype.eq_ignore_ascii_case(mime) {
+            return p.get_body().ok();
         }
-        None
-    };
-    find("text/plain").or_else(|| find("text/html").map(|h| html_to_text(&h)))
+        stack.extend(p.subparts.iter().rev());
+    }
+    None
 }
 
-fn html_to_text(h: &str) -> String {
-    let mut out = String::new();
-    let (mut in_tag, mut skip) = (false, false);
-    let lower = h.to_lowercase();
-    let b = h.as_bytes();
-    let mut i = 0;
-    while i < b.len() {
-        if !in_tag && b[i] == b'<' {
-            in_tag = true;
-            let tag = &lower[i..];
-            if tag.starts_with("<style") || tag.starts_with("<script") {
-                skip = true;
-            } else if tag.starts_with("</style") || tag.starts_with("</script") {
-                skip = false;
-            } else if tag.starts_with("<br")
-                || tag.starts_with("</p")
-                || tag.starts_with("</div")
-                || tag.starts_with("</tr")
-                || tag.starts_with("</li")
-            {
-                out.push('\n');
-            }
-        } else if in_tag && b[i] == b'>' {
-            in_tag = false;
-        } else if !in_tag && !skip {
-            let ch = h[i..].chars().next().unwrap();
-            out.push(ch);
-            i += ch.len_utf8();
+/// Corps mis en forme : le HTML s'il donne du texte (gras, liens…), sinon le texte brut.
+fn extract_body(m: &mailparse::ParsedMail) -> Body {
+    let html = find_part(m, "text/html").map(|h| parse_html(&h)).filter(|b| !b.lines.is_empty());
+    html.or_else(|| find_part(m, "text/plain").map(|t| parse_plain(&t))).filter(|b| !b.lines.is_empty()).unwrap_or_else(|| Body {
+        lines: vec![Line { spans: vec![Span { text: "(message sans contenu texte)".into(), ..Default::default() }], ..Default::default() }],
+    })
+}
+
+/// Découpe un texte en morceaux, les URL `http(s)://…` devenant des liens.
+fn linkify(text: &str) -> Vec<(String, Option<String>)> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(i) = ["https://", "http://"].iter().filter_map(|p| rest.find(p)).min() {
+        let tail = &rest[i..];
+        let end = tail.find(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"')).unwrap_or(tail.len());
+        let url = tail[..end].trim_end_matches(['.', ',', ';', ':', '!', '?', ')', '\'']);
+        if url.len() <= "https://".len() {
+            out.push((rest[..i + 4].to_string(), None));
+            rest = &rest[i + 4..];
             continue;
         }
-        i += 1;
+        if i > 0 {
+            out.push((rest[..i].to_string(), None));
+        }
+        out.push((url.to_string(), Some(url.to_string())));
+        rest = &rest[i + url.len()..];
     }
-    let out = out
-        .replace("&nbsp;", " ")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'");
-    let mut res = String::new();
-    let mut blank = 0;
-    for l in out.lines().map(str::trim) {
-        blank = if l.is_empty() { blank + 1 } else { 0 };
-        if blank <= 1 {
-            res.push_str(l);
-            res.push('\n');
+    if !rest.is_empty() {
+        out.push((rest.to_string(), None));
+    }
+    out
+}
+
+fn parse_plain(t: &str) -> Body {
+    let mut lines: Vec<Line> = Vec::new();
+    for raw in t.replace('\r', "").lines() {
+        let mut rest = raw.trim_end();
+        let mut quote = 0u8;
+        while let Some(r) = rest.trim_start().strip_prefix('>') {
+            quote = quote.saturating_add(1);
+            rest = r;
+        }
+        let rest = if quote > 0 { rest.strip_prefix(' ').unwrap_or(rest) } else { rest };
+        let spans: Vec<Span> = linkify(rest).into_iter().map(|(text, link)| Span { text, link, ..Default::default() }).collect();
+        if spans.is_empty() && lines.last().is_none_or(|l| l.spans.is_empty()) {
+            continue;
+        }
+        lines.push(Line { spans, quote, bullet: false });
+    }
+    while lines.last().is_some_and(|l| l.spans.is_empty()) {
+        lines.pop();
+    }
+    Body { lines }
+}
+
+#[derive(Default)]
+struct Builder {
+    lines: Vec<Line>,
+    cur: Vec<Span>,
+    bold: u32,
+    italic: u32,
+    links: Vec<Option<String>>,
+    quote: u8,
+    bullet: bool,
+}
+
+impl Builder {
+    fn push_text(&mut self, text: &str) {
+        // espaces HTML : toute suite d'espaces/retours devient une seule espace
+        let mut t = String::with_capacity(text.len());
+        let mut prev_space = self.cur.last().is_none_or(|s| s.text.ends_with(' '));
+        for c in text.chars() {
+            if c.is_whitespace() && c != '\u{a0}' {
+                if !prev_space {
+                    t.push(' ');
+                }
+                prev_space = true;
+            } else {
+                t.push(if c == '\u{a0}' { ' ' } else { c });
+                prev_space = false;
+            }
+        }
+        if t.is_empty() {
+            return;
+        }
+        let link = self.links.iter().rev().find_map(|l| l.clone());
+        let pieces = if link.is_some() { vec![(t, link)] } else { linkify(&t) };
+        for (text, link) in pieces {
+            let (bold, italic) = (self.bold > 0, self.italic > 0);
+            match self.cur.last_mut() {
+                Some(s) if s.bold == bold && s.italic == italic && s.link == link => s.text.push_str(&text),
+                _ => self.cur.push(Span { text, bold, italic, link }),
+            }
         }
     }
-    res.trim().to_string()
+
+    /// Termine la ligne en cours.
+    fn flush(&mut self) {
+        let mut spans = std::mem::take(&mut self.cur);
+        if let Some(f) = spans.first_mut() {
+            f.text = f.text.trim_start().to_string();
+        }
+        if let Some(l) = spans.last_mut() {
+            l.text = l.text.trim_end().to_string();
+        }
+        spans.retain(|s| !s.text.is_empty());
+        let bullet = std::mem::take(&mut self.bullet);
+        if !spans.is_empty() {
+            self.lines.push(Line { spans, quote: self.quote, bullet });
+        }
+    }
+
+    /// Fin de paragraphe : ligne en cours, puis une ligne blanche (une seule d'affilée).
+    fn para(&mut self) {
+        self.flush();
+        if self.lines.last().is_some_and(|l| !l.spans.is_empty()) {
+            self.lines.push(Line { quote: self.quote, ..Default::default() });
+        }
+    }
+}
+
+fn parse_html(h: &str) -> Body {
+    let lower = h.to_ascii_lowercase();
+    let mut b = Builder::default();
+    let mut i = 0;
+    while i < h.len() {
+        let Some(lt) = h[i..].find('<').map(|k| i + k) else {
+            b.push_text(&decode_entities_full(&h[i..]));
+            break;
+        };
+        if lt > i {
+            b.push_text(&decode_entities_full(&h[i..lt]));
+        }
+        if lower[lt..].starts_with("<!--") {
+            i = lower[lt..].find("-->").map_or(h.len(), |k| lt + k + 3);
+            continue;
+        }
+        let Some(gt) = h[lt..].find('>').map(|k| lt + k) else { break };
+        let tag = &h[lt + 1..gt];
+        i = gt + 1;
+        let closing = tag.starts_with('/');
+        let name: String =
+            tag.trim_start_matches('/').chars().take_while(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase();
+        match name.as_str() {
+            "style" | "script" | "head" | "title" if !closing => {
+                let close = format!("</{name}");
+                i = lower[i..].find(&close).map_or(h.len(), |k| i + k);
+            }
+            "b" | "strong" | "th" if !closing => b.bold += 1,
+            "b" | "strong" | "th" => b.bold = b.bold.saturating_sub(1),
+            "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
+                b.para();
+                if closing { b.bold = b.bold.saturating_sub(1) } else { b.bold += 1 }
+            }
+            "i" | "em" | "cite" if !closing => b.italic += 1,
+            "i" | "em" | "cite" => b.italic = b.italic.saturating_sub(1),
+            "a" if !closing => {
+                let href = attr(tag, "href").filter(|u| u.starts_with("http://") || u.starts_with("https://") || u.starts_with("mailto:"));
+                b.links.push(href);
+            }
+            "a" => {
+                b.links.pop();
+            }
+            "br" => b.flush(),
+            "p" => b.para(),
+            "div" | "tr" | "table" | "ul" | "ol" | "pre" => b.flush(),
+            "li" if !closing => {
+                b.flush();
+                b.bullet = true;
+            }
+            "li" => b.flush(),
+            "td" if closing => b.push_text(" "),
+            "blockquote" => {
+                b.para();
+                b.quote = if closing { b.quote.saturating_sub(1) } else { b.quote.saturating_add(1) };
+            }
+            "hr" => {
+                b.flush();
+                b.push_text("────────");
+                b.flush();
+            }
+            "img" if !closing => {
+                if let Some(alt) = attr(tag, "alt").filter(|a| !a.trim().is_empty()) {
+                    b.push_text(&format!("[{}]", alt.trim()));
+                }
+            }
+            _ => {}
+        }
+    }
+    b.flush();
+    while b.lines.last().is_some_and(|l| l.spans.is_empty()) {
+        b.lines.pop();
+    }
+    while b.lines.first().is_some_and(|l| l.spans.is_empty()) {
+        b.lines.remove(0);
+    }
+    Body { lines: b.lines }
+}
+
+/// Entités HTML : celles de `decode_entities` plus les plus courantes en français.
+fn decode_entities_full(s: &str) -> String {
+    let mut t = decode_entities(s);
+    if t.contains('&') {
+        for (k, v) in [
+            ("&nbsp;", "\u{a0}"),
+            ("&hellip;", "…"),
+            ("&rsquo;", "’"),
+            ("&lsquo;", "‘"),
+            ("&laquo;", "«"),
+            ("&raquo;", "»"),
+            ("&ndash;", "–"),
+            ("&mdash;", "—"),
+            ("&euro;", "€"),
+            ("&copy;", "©"),
+            ("&eacute;", "é"),
+            ("&egrave;", "è"),
+            ("&agrave;", "à"),
+            ("&ecirc;", "ê"),
+            ("&ccedil;", "ç"),
+            ("&bull;", "•"),
+        ] {
+            t = t.replace(k, v);
+        }
+    }
+    t
 }
 
 /// « "Jean Dupont" <jd@x.fr> » → « Jean Dupont »
@@ -537,13 +907,55 @@ mod tests {
     fn search_response() {
         let body = json!({"SearchResponse": {"m": [
             {"id": "4321", "su": "Rappel examen", "d": 1764230400000i64, "f": "u",
-             "e": [{"t": "t", "a": "moi@etu.cyu.fr"}, {"t": "f", "a": "scol@cyu.fr", "p": "Scolarité CY"}]},
+             "e": [{"t": "t", "a": "moi@etu.cyu.fr"}, {"t": "f", "a": "scol@cyu.fr", "p": "Scolarité CY"}, {"t": "c", "a": "prof@cyu.fr", "p": "Prof"}]},
             {"id": "4300", "su": "Lu", "d": 1764144000000i64, "f": "", "e": [{"t": "f", "a": "x@y.fr"}]}
         ]}});
-        let h = parse_search(&body);
+        let h = parse_search(&body, Folder::Inbox);
         assert_eq!(h.len(), 2);
         assert_eq!((h[0].uid, h[0].from.as_str(), h[0].subject.as_str(), h[0].unread), (4321, "Scolarité CY", "Rappel examen", true));
         assert_eq!((h[1].from.as_str(), h[1].unread), ("x@y.fr", false));
         assert!(!h[0].date.is_empty());
+        assert_eq!(h[0].sender, Some(Contact { name: "Scolarité CY".into(), addr: "scol@cyu.fr".into() }));
+        assert_eq!(h[0].to, [Contact { name: String::new(), addr: "moi@etu.cyu.fr".into() }]);
+        assert_eq!(h[0].cc[0].label(), "Prof");
+        assert_eq!(h[0].ts, 1764230400000);
+    }
+
+    #[test]
+    fn sent_shows_recipient() {
+        let body = json!({"SearchResponse": {"m": [
+            {"id": "1", "su": "Re", "d": 1764230400000i64, "e": [{"t": "f", "a": "moi@x.fr"}, {"t": "t", "a": "prof@x.fr", "p": "Prof"}]}]}});
+        assert_eq!(parse_search(&body, Folder::Sent)[0].from, "À : Prof");
+    }
+
+    #[test]
+    fn html_formatting() {
+        let b = parse_html(
+            "<html><head><style>p{}</style></head><body><p>Bonjour <b>Lucas</b>,</p><p>Voir <a href=\"https://cyu.fr/x\">le site</a> et <i>vite</i>&nbsp;!</p><ul><li>un</li><li>deux</li></ul><blockquote>cité</blockquote></body></html>",
+        );
+        let l = &b.lines;
+        assert_eq!(l[0].spans[1], Span { text: "Lucas".into(), bold: true, ..Default::default() });
+        assert_eq!(l[0].spans[2].text, ",");
+        assert_eq!(l[2].spans[1].link.as_deref(), Some("https://cyu.fr/x"));
+        assert!(l[2].spans[3].italic);
+        assert!(l.iter().any(|x| x.bullet && x.spans[0].text == "un"));
+        assert!(l.iter().any(|x| x.quote == 1 && x.spans[0].text == "cité"));
+    }
+
+    #[test]
+    fn plain_links_and_quotes() {
+        let b = parse_plain("Voir https://a.fr/b. Merci\n> cité\n\n\n\nfin");
+        assert_eq!(b.lines[0].spans[1].link.as_deref(), Some("https://a.fr/b"));
+        assert_eq!(b.lines[1].quote, 1);
+        assert_eq!(b.lines.len(), 4);
+    }
+
+    #[test]
+    fn requetes_zimbra() {
+        assert_eq!(search_query(Folder::Inbox, "  "), "in:inbox");
+        assert_eq!(search_query(Folder::Sent, "from:prof examen"), "in:sent (from:prof examen)");
+        assert_eq!(MsgAction::Unread.request(12)["action"], json!({"id": "12", "op": "!read"}));
+        assert_eq!(MsgAction::Move(Folder::Inbox).request(3)["action"], json!({"id": "3", "op": "move", "l": "2"}));
+        assert_eq!(MsgAction::NotSpam.request(3)["action"]["l"], "2");
     }
 }
