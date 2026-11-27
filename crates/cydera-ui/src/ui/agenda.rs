@@ -4,7 +4,7 @@
 use super::card::{course_card, lunch_pill};
 use super::motion;
 use super::theme::{self, bold, mono, mono_bold, regular};
-use super::{Action, capitalize, date_longue, jour_court};
+use super::{Action, date_longue, jour_court};
 use crate::cache::Store;
 use crate::model::{Cours, fmt_duration, stats};
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, Timelike, Weekday};
@@ -84,14 +84,10 @@ pub fn show(ui: &mut egui::Ui, store: &Store, selected: NaiveDate, now: NaiveDat
     ui.add_space(12.0);
 
     let day: Vec<&Cours> = store.day(selected).collect();
-    // Titre du jour + résumé en langage courant
+    // Résumé en langage courant (le jour est déjà indiqué par la pastille cyan au-dessus).
     ui.horizontal(|ui| {
         ui.add_space(4.0);
-        ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 2.0;
-            ui.label(egui::RichText::new(capitalize(&date_longue(selected))).font(bold(21.0)).color(theme::TEXT));
-            ui.label(egui::RichText::new(summary(&day)).font(regular(13.0)).color(theme::MUTED));
-        });
+        ui.label(egui::RichText::new(summary(&day)).font(regular(13.0)).color(theme::MUTED));
     });
     ui.add_space(10.0);
 
