@@ -13,7 +13,7 @@ tokio = { workspace = true, features = ["time", "sync"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-getrandom = "0.3"
+getrandom = "0.4"
 chrono.workspace = true
 iroh-mdns-address-lookup = "0.6"
 sha2 = "0.11"
