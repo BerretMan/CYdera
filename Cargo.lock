@@ -1173,7 +1173,7 @@ dependencies = [
 
 [[package]]
 name = "cydera"
-version = "0.1.0-beta.2"
+version = "0.1.0-beta.3"
 dependencies = [
  "chrono",
  "cydera-core",
@@ -1185,7 +1185,7 @@ dependencies = [
 
 [[package]]
 name = "cydera-android"
-version = "0.1.0-beta.2"
+version = "0.1.0-beta.3"
 dependencies = [
  "android-activity",
  "android_logger",
@@ -1199,7 +1199,7 @@ dependencies = [
 
 [[package]]
 name = "cydera-core"
-version = "0.1.0-beta.2"
+version = "0.1.0-beta.3"
 dependencies = [
  "chrono",
  "dirs",
@@ -1221,7 +1221,7 @@ dependencies = [
 
 [[package]]
 name = "cydera-sync"
-version = "0.1.0-beta.2"
+version = "0.1.0-beta.3"
 dependencies = [
  "chrono",
  "cydera-core",
@@ -1240,7 +1240,7 @@ dependencies = [
 
 [[package]]
 name = "cydera-ui"
-version = "0.1.0-beta.2"
+version = "0.1.0-beta.3"
 dependencies = [
  "chrono",
  "cydera-core",
